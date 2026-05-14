@@ -1,0 +1,484 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+   Name = "Totally Accurate Tops",
+   Icon = 0,
+   LoadingTitle = "Loading...",
+   LoadingSubtitle = "by you",
+   Theme = "Default",
+   DisableRayfieldPrompts = true,
+   DisableBuildWarnings = true,
+})
+
+local MainTab = Window:CreateTab("Main", 4483362458)
+local MainSection = MainTab:CreateSection("Helpers & Auto Farm [Legit]")
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+local lastClick = 0
+local COOLDOWN = 0.5
+
+local perfectConnection
+local goodEnoughConnection
+local autoEnergyConnection
+
+local isManualRun = false
+local manualCancelled = false
+local lastPos = nil
+local stuckCount = 0
+local trashFarmRunning = false
+
+local DUMPSTERS = {
+    Dumpster_8 = Vector3.new(784.5,  118.95, -318),
+    Dumpster_5 = Vector3.new(-16.5,  118.44, -179),
+    Dumpster_7 = Vector3.new(339,    118.95, -521.5),
+    Dumpster_6 = Vector3.new(-16.5,  118.44, -169),
+    Dumpster_2 = Vector3.new(592.5,  118.95, -318),
+    Dumpster_4 = Vector3.new(503.5,  118.44, -229),
+    Dumpster_3 = Vector3.new(144,    118.95, 188.45),
+    Dumpster_9 = Vector3.new(794.5,  118.95, -318),
+    Dumpster_1 = Vector3.new(602.5,  118.95, -318),
+}
+
+local function randomWait(min, max)
+    task.wait(min + math.random() * (max - min))
+end
+
+local function maybeJump(humanoid)
+    if math.random(1, 3) == 1 then
+        humanoid.Jump = true
+        task.wait(0.1)
+        humanoid.Jump = false
+    end
+end
+
+local function checkStuck(hrp, humanoid, target)
+    local currentPos = hrp.Position
+    if lastPos then
+        local moved = (currentPos - lastPos).Magnitude
+        if moved < 0.5 then
+            stuckCount += 1
+            if stuckCount >= 2 then
+                humanoid.Jump = true
+                task.wait(0.2)
+                humanoid.Jump = false
+                humanoid:MoveTo(target)
+                stuckCount = 0
+            end
+        else
+            stuckCount = 0
+        end
+    end
+    lastPos = currentPos
+end
+
+local function walkTo(hrp, humanoid, target, timeout)
+    stuckCount = 0
+    lastPos = nil
+    humanoid:MoveTo(target)
+    local t = tick() + (timeout or 20)
+    repeat
+        task.wait(0.3)
+        if not trashFarmRunning then return false end
+        checkStuck(hrp, humanoid, target)
+        maybeJump(humanoid)
+    until (hrp.Position - target).Magnitude < 4 or tick() > t
+    return (hrp.Position - target).Magnitude < 4
+end
+
+local function getTrashCount()
+    local ok, label = pcall(function()
+        return playerGui.HUD["Main HUD"].Corner.Trash.Label
+    end)
+    if not ok or not label then return 0, 10 end
+    local cur, max = label.Text:match("(%d+)%s*/%s*(%d+)")
+    local c = tonumber(cur) or 0
+    local m = tonumber(max) or 10
+    if m == 0 then m = 10 end
+    return c, m
+end
+
+local function isDumpsterOnCooldown(dumpsterPart)
+    local timerGui = dumpsterPart:FindFirstChild("TimerGUI")
+    if not timerGui then return false end
+    local label = timerGui:FindFirstChild("Label")
+    if not label then return false end
+    return timerGui.Enabled and label.Text ~= "" and label.Text ~= "0:00"
+end
+
+local function getAvailableDumpster()
+    local dumpsters = workspace.Map.Environment.Dumpsters
+    local char = Players.LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+    local best, bestDist = nil, math.huge
+    for name, pos in pairs(DUMPSTERS) do
+        local part = dumpsters:FindFirstChild(name)
+        if part and not isDumpsterOnCooldown(part) then
+            local dist = (hrp.Position - pos).Magnitude
+            if dist < bestDist then
+                best = {name = name, part = part, pos = pos}
+                bestDist = dist
+            end
+        end
+    end
+    return best
+end
+
+local function getNextAvailableDumpsterTime()
+    local dumpsters = workspace.Map.Environment.Dumpsters
+    local soonest = nil
+    for name, _ in pairs(DUMPSTERS) do
+        local part = dumpsters:FindFirstChild(name)
+        if part then
+            local timerGui = part:FindFirstChild("TimerGUI")
+            if timerGui and timerGui.Enabled then
+                local label = timerGui:FindFirstChild("Label")
+                if label and label.Text ~= "" then
+                    local m, s = label.Text:match("(%d+):(%d+)")
+                    if m and s then
+                        local secs = tonumber(m) * 60 + tonumber(s)
+                        if not soonest or secs < soonest then
+                            soonest = secs
+                        end
+                    end
+                end
+            else
+                return 0
+            end
+        end
+    end
+    return soonest or 0
+end
+
+local function doTrashFarm()
+    local function getChar()
+        local c = Players.LocalPlayer.Character
+        if not c then return nil, nil end
+        return c:FindFirstChild("HumanoidRootPart"), c:FindFirstChild("Humanoid")
+    end
+
+    local lastTrashCount = -1
+    local lastIncreaseTime = tick()
+
+    while trashFarmRunning do
+        local hrp, humanoid = getChar()
+        if not hrp or not humanoid then task.wait(1) continue end
+
+        local cur, max = getTrashCount()
+
+        if cur ~= lastTrashCount then
+            lastTrashCount = cur
+            lastIncreaseTime = tick()
+        end
+
+        if tick() - lastIncreaseTime > 30 then
+            Rayfield:Notify({ Title = "Trash Farm", Content = "Stuck! Resetting character...", Duration = 3 })
+            Players.LocalPlayer.Character:BreakJoints()
+            task.wait(4)
+            lastIncreaseTime = tick()
+            lastTrashCount = -1
+            continue
+        end
+
+        if cur >= max and cur > 0 then
+            local dumpster = getAvailableDumpster()
+            if dumpster then
+                local arrived = walkTo(hrp, humanoid, dumpster.pos, 30)
+                if arrived then
+                    randomWait(0.3, 0.7)
+                    local prompt = dumpster.part:FindFirstChild("Prompt")
+                    if prompt then
+                        fireproximityprompt(prompt, 2)
+                        task.wait(3)
+                        local waitStart = tick()
+                        repeat
+                            task.wait(0.5)
+                            cur, max = getTrashCount()
+                        until cur < max or tick() - waitStart > 8
+                        lastIncreaseTime = tick()
+                        lastTrashCount = cur
+                    end
+                end
+            else
+                local waitSecs = getNextAvailableDumpsterTime()
+                waitSecs = math.max(waitSecs or 60, 5)
+                Rayfield:Notify({
+                    Title = "Trash Farm",
+                    Content = "All dumpsters on cooldown! Waiting " .. math.ceil(waitSecs) .. "s",
+                    Duration = 5,
+                })
+                local waitEnd = tick() + waitSecs + 2
+                repeat
+                    task.wait(2)
+                    if getAvailableDumpster() then break end
+                until tick() > waitEnd or not trashFarmRunning
+                lastIncreaseTime = tick()
+            end
+        else
+            local hrp2, humanoid2 = getChar()
+            if not hrp2 or not humanoid2 then task.wait(1) continue end
+
+            local trashFolder = workspace.Map.Environment.Trash
+            local nearest, nearestDist, nearestPrompt = nil, math.huge, nil
+
+            for _, paper in ipairs(trashFolder:GetChildren()) do
+                local prompt = paper:FindFirstChild("Prompt")
+                if prompt and prompt.Enabled then
+                    local dist = (hrp2.Position - paper.Position).Magnitude
+                    if dist < nearestDist then
+                        nearest = paper
+                        nearestDist = dist
+                        nearestPrompt = prompt
+                    end
+                end
+            end
+
+            if nearest then
+                local arrived = walkTo(hrp2, humanoid2, nearest.Position, 20)
+                if arrived and nearestPrompt and nearestPrompt.Enabled then
+                    fireproximityprompt(nearestPrompt)
+                    task.wait(0.3)
+                end
+            else
+                task.wait(3)
+            end
+        end
+
+        task.wait(0.1)
+    end
+end
+
+local function doClick()
+    pcall(function()
+        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+        task.wait(0.02)
+        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+    end)
+end
+
+local function getBar()
+    local hud = playerGui:FindFirstChild("HUD")
+    if not hud then return end
+    local launch = hud:FindFirstChild("Launch")
+    if not launch or not launch.Visible then return end
+    local bar = launch:FindFirstChild("Bar")
+    if not bar or not bar.Visible then return end
+    return bar
+end
+
+local function isTrackerInPerfectMiddle(zone, tracker)
+    local zoneCenter = zone.AbsolutePosition.X + zone.AbsoluteSize.X / 2
+    local trackerCenter = tracker.AbsolutePosition.X + tracker.AbsoluteSize.X / 2
+    local threshold = zone.AbsoluteSize.X * 0.15
+    return math.abs(trackerCenter - zoneCenter) < threshold
+end
+
+local function isTrackerInGoodMiddle(zone, tracker)
+    local zoneCenter = zone.AbsolutePosition.X + zone.AbsoluteSize.X / 2
+    local trackerCenter = tracker.AbsolutePosition.X + tracker.AbsoluteSize.X / 2
+    local threshold = zone.AbsoluteSize.X * 0.35
+    return math.abs(trackerCenter - zoneCenter) < threshold
+end
+
+local function isOutOfEnergy()
+    local ok, label = pcall(function()
+        return playerGui["Player Notifications"].Notifications.Message.Label
+    end)
+    if not ok or not label then return false end
+    return label.Visible and string.find(label.Text, "out of energy") ~= nil
+end
+
+local isBurgerBuying = false
+
+local function doBurgerRun(manual)
+    if isBurgerBuying then return end
+    isBurgerBuying = true
+    isManualRun = manual or false
+    manualCancelled = false
+
+    local character = Players.LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character and character:FindFirstChild("Humanoid")
+    if not hrp or not humanoid then isBurgerBuying = false return end
+
+    local originalPos = hrp.Position
+    local standPos = Vector3.new(573.88, 118, -157.43)
+
+    local keyConnection
+    if isManualRun then
+        keyConnection = UserInputService.InputBegan:Connect(function(input, gp)
+            if gp then return end
+            if input.UserInputType == Enum.UserInputType.Keyboard then
+                manualCancelled = true
+                humanoid:MoveTo(hrp.Position)
+            end
+        end)
+    end
+
+    stuckCount = 0
+    lastPos = nil
+    humanoid:MoveTo(standPos)
+    local timeout = tick() + 12
+    repeat
+        task.wait(0.3)
+        if manualCancelled then break end
+        checkStuck(hrp, humanoid, standPos)
+        maybeJump(humanoid)
+    until (hrp.Position - standPos).Magnitude < 3 or tick() > timeout or manualCancelled
+
+    if not manualCancelled then
+        randomWait(0.4, 0.9)
+        local bought = false
+        local ok, vendor = pcall(function()
+            return workspace.Map["Food Vendors"]:GetChildren()[11]
+        end)
+        if ok and vendor then
+            local prompt = vendor.Counter["Prompt Host"].Prompt
+            if prompt and not bought then
+                bought = true
+                fireproximityprompt(prompt)
+            end
+        end
+
+        if not isManualRun then
+            randomWait(2.8, 3.4)
+            local returnPos = originalPos + Vector3.new(math.random(-2,2), 0, math.random(-2,2))
+            stuckCount = 0
+            lastPos = nil
+            humanoid:MoveTo(returnPos)
+            local returnTimeout = tick() + 12
+            repeat
+                task.wait(0.3)
+                checkStuck(hrp, humanoid, returnPos)
+                maybeJump(humanoid)
+            until (hrp.Position - returnPos).Magnitude < 3 or tick() > returnTimeout
+        end
+    end
+
+    if keyConnection then keyConnection:Disconnect() end
+    isBurgerBuying = false
+    isManualRun = false
+    manualCancelled = false
+end
+
+MainTab:CreateToggle({
+    Name = "Auto Perfect Launch",
+    CurrentValue = false,
+    Flag = "AutoPerfectLaunch",
+    Callback = function(value)
+        if value then
+            perfectConnection = RunService.Heartbeat:Connect(function()
+                local now = tick()
+                if now - lastClick < COOLDOWN then return end
+                local bar = getBar()
+                if not bar then return end
+                local goal = bar:FindFirstChild("Goal")
+                local tracker = bar:FindFirstChild("Tracker")
+                if not goal or not tracker then return end
+                if isTrackerInPerfectMiddle(goal, tracker) then
+                    lastClick = now
+                    doClick()
+                end
+            end)
+        else
+            if perfectConnection then perfectConnection:Disconnect() perfectConnection = nil end
+        end
+    end,
+})
+
+MainTab:CreateToggle({
+    Name = "Auto Good Enough Launch",
+    CurrentValue = false,
+    Flag = "AutoGoodEnoughLaunch",
+    Callback = function(value)
+        if value then
+            goodEnoughConnection = RunService.Heartbeat:Connect(function()
+                local now = tick()
+                if now - lastClick < COOLDOWN then return end
+                local bar = getBar()
+                if not bar then return end
+                local goodEnough = bar:FindFirstChild("Goal") and bar.Goal:FindFirstChild("Good Enough")
+                local tracker = bar:FindFirstChild("Tracker")
+                if not goodEnough or not tracker then return end
+                if isTrackerInGoodMiddle(goodEnough, tracker) then
+                    lastClick = now
+                    doClick()
+                end
+            end)
+        else
+            if goodEnoughConnection then goodEnoughConnection:Disconnect() goodEnoughConnection = nil end
+        end
+    end,
+})
+
+local lastBuy = 0
+local BUYCOOLDOWN = 8
+
+MainTab:CreateToggle({
+    Name = "Auto Burger (Low Energy)",
+    CurrentValue = false,
+    Flag = "AutoBuyBurger",
+    Callback = function(value)
+        if value then
+            autoEnergyConnection = RunService.Heartbeat:Connect(function()
+                local now = tick()
+                if now - lastBuy < BUYCOOLDOWN then return end
+                if isOutOfEnergy() and not isBurgerBuying then
+                    lastBuy = now
+                    task.spawn(function() doBurgerRun(false) end)
+                end
+            end)
+        else
+            if autoEnergyConnection then autoEnergyConnection:Disconnect() autoEnergyConnection = nil end
+        end
+    end,
+})
+
+MainTab:CreateButton({
+    Name = "Get Burger Now",
+    Callback = function()
+        if not isBurgerBuying then
+            task.spawn(function() doBurgerRun(true) end)
+        else
+            Rayfield:Notify({ Title = "Burger Run", Content = "Already on a burger run!", Duration = 2 })
+        end
+    end,
+})
+
+local TrashTab = Window:CreateTab("Trash Farm", 4483362458)
+local TrashSection = TrashTab:CreateSection("Auto Trash Farm")
+
+TrashTab:CreateToggle({
+    Name = "Auto Trash Farm",
+    CurrentValue = false,
+    Flag = "AutoTrashFarm",
+    Callback = function(value)
+        trashFarmRunning = value
+        if value then
+            task.spawn(doTrashFarm)
+            Rayfield:Notify({ Title = "Trash Farm", Content = "Trash farm started!", Duration = 3 })
+        else
+            Rayfield:Notify({ Title = "Trash Farm", Content = "Trash farm stopped.", Duration = 3 })
+        end
+    end,
+})
+
+local WorldTab = Window:CreateTab("World", 4483362458)
+local WorldSection = WorldTab:CreateSection("Coming Soon")
+
+local MiscTab = Window:CreateTab("Misc", 4483362458)
+local MiscSection = MiscTab:CreateSection("Coming Soon")
+
+local ConfigTab = Window:CreateTab("Config", 4483362458)
+local ConfigSection = ConfigTab:CreateSection("Coming Soon")
+
+Rayfield:Notify({
+    Title = "Loaded",
+    Content = "Totally Accurate Tops script loaded.",
+    Duration = 3,
+})
