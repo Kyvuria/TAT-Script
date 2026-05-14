@@ -469,6 +469,9 @@ end
 local function onAutoPerfectLaunch(value)
     toggleStates.AutoPerfectLaunch = value
     if value then
+        local passCount = 0
+        local wasInZone = false
+
         perfectConnection = RunService.Heartbeat:Connect(function()
             local now = tick()
             if now - lastClick < COOLDOWN then return end
@@ -476,12 +479,24 @@ local function onAutoPerfectLaunch(value)
             local goal    = bar:FindFirstChild("Goal")
             local tracker = bar:FindFirstChild("Tracker")
             if not goal or not tracker then return end
+
             local tc = tracker.AbsolutePosition.X + tracker.AbsoluteSize.X / 2
             local goalCenter = goal.AbsolutePosition.X + goal.AbsoluteSize.X / 2
             local goalHalf = goal.AbsoluteSize.X / 2
             local threshold = goalHalf * 0.4
-            if math.abs(tc - goalCenter) < threshold then
-                lastClick = now doClick()
+
+            local inZone = math.abs(tc - goalCenter) < threshold
+
+            if inZone and not wasInZone then
+                passCount = passCount + 1
+            end
+
+            wasInZone = inZone
+
+            if inZone and passCount >= 2 then
+                passCount = 0
+                lastClick = now
+                doClick()
             end
         end)
     else
