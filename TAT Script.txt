@@ -26,7 +26,6 @@ local COOLDOWN = 0.5
  
 local perfectConnection
 local autoEnergyConnection
-local sprintConnection
 
 local toggleStates = {
     AutoPerfectLaunch    = false,
@@ -34,6 +33,7 @@ local toggleStates = {
     AutoTrashFarm        = false,
     AutoTrashFarmBlatant = false,
     MeteorESP            = false,
+    PlayerESP            = false,
 }
 local toggleCallbacks = {}
 
@@ -46,12 +46,15 @@ local blatantFarmRunning = false
 local noclipConnection = nil
 local trashBlacklist = {}
 
--- ── Underground ───────────────────────────────────────────────────────────────
-local PLAYER_RADIUS = 100
-local UNDERGROUND_Y = -50    -- studs below ground
-local TWEEN_SPEED   = 80     -- studs per second while underground
+local SAFE_SPEED = 140
+local lastGroundTouch = 0
+local GROUND_TOUCH_INTERVAL = 6
+local GROUND_Y = 2
+local UNDERGROUND_Y = 211
+local isTouchingGround = false
 local isUnderground = false
-local savedGroundY  = nil
+
+local PLAYER_RADIUS = 100
 
 local function isPlayerNearby()
     local char = LocalPlayer.Character
@@ -68,40 +71,6 @@ local function isPlayerNearby()
     return false
 end
 
-local function tweenHRP(hrp, targetPos, duration)
-    local info  = TweenInfo.new(math.max(duration, 0.05), Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(hrp, info, { CFrame = CFrame.new(targetPos) })
-    tween:Play()
-    tween.Completed:Wait()
-end
-
--- Sink underground, store ground Y
-local function goUnderground(hrp)
-    if isUnderground then return end
-    savedGroundY = hrp.Position.Y
-    tweenHRP(hrp, Vector3.new(hrp.Position.X, savedGroundY + UNDERGROUND_Y, hrp.Position.Z), 0.35)
-    isUnderground = true
-end
-
--- Tween XZ continuously underground toward target (speed-based duration)
-local function tweenUnderTo(hrp, targetXZ)
-    local underY  = savedGroundY + UNDERGROUND_Y
-    local current = Vector3.new(hrp.Position.X, underY, hrp.Position.Z)
-    local dest    = Vector3.new(targetXZ.X, underY, targetXZ.Z)
-    local dist    = (dest - current).Magnitude
-    tweenHRP(hrp, dest, math.max(dist / TWEEN_SPEED, 0.05))
-end
-
--- Surface back to saved ground Y
-local function surfaceUp(hrp)
-    if not isUnderground then return end
-    tweenHRP(hrp, Vector3.new(hrp.Position.X, savedGroundY, hrp.Position.Z), 0.35)
-    isUnderground = false
-    savedGroundY  = nil
-end
--- ─────────────────────────────────────────────────────────────────────────────
-
--- ── Noclip ────────────────────────────────────────────────────────────────────
 local function startNoclip()
     if noclipConnection then noclipConnection:Disconnect() end
     noclipConnection = RunService.Stepped:Connect(function()
@@ -122,9 +91,7 @@ local function stopNoclip()
         end
     end
 end
--- ─────────────────────────────────────────────────────────────────────────────
 
--- ── Auto Sprint ───────────────────────────────────────────────────────────────
 local function startAutoSprint(farmCheck)
     task.spawn(function()
         while farmCheck() do
@@ -144,7 +111,6 @@ local function stopAutoSprint()
         VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.LeftControl, false, game)
     end)
 end
--- ─────────────────────────────────────────────────────────────────────────────
 
 local function randomWait(mn, mx)
     task.wait(mn + math.random() * (mx - mn))
@@ -186,37 +152,83 @@ local function walkTo(hrp, humanoid, target, timeout, blacklistKey, farmCheck)
     return arrived
 end
 
--- ── Blatant walk with continuous underground tweening ────────────────────────
-local function blatantWalkTo(hrp, humanoid, target, timeout, blacklistKey, farmCheck)
-    if isPlayerNearby() then
-        -- Go underground if not already
-        if not isUnderground then
-            goUnderground(hrp)
+local function goUnderground(hrp)
+    if isUnderground then return end
+    local dest = Vector3.new(hrp.Position.X, UNDERGROUND_Y, hrp.Position.Z)
+    local dist = (dest - hrp.Position).Magnitude
+    local dur = math.max(dist / SAFE_SPEED, 0.05)
+    local tween = TweenService:Create(hrp, TweenInfo.new(dur, Enum.EasingStyle.Linear), {CFrame = CFrame.new(dest)})
+    tween:Play()
+    tween.Completed:Wait()
+    isUnderground = true
+end
+
+local function surfaceUp(hrp)
+    if not isUnderground then return end
+    local dest = Vector3.new(hrp.Position.X, UNDERGROUND_Y + 8, hrp.Position.Z)
+    local dist = (dest - hrp.Position).Magnitude
+    local dur = math.max(dist / SAFE_SPEED, 0.05)
+    local tween = TweenService:Create(hrp, TweenInfo.new(dur, Enum.EasingStyle.Linear), {CFrame = CFrame.new(dest)})
+    tween:Play()
+    tween.Completed:Wait()
+    isUnderground = false
+end
+
+local function touchGround(hrp)
+    if isTouchingGround then return end
+    isTouchingGround = true
+    local downDest = Vector3.new(hrp.Position.X, GROUND_Y, hrp.Position.Z)
+    local downDist = (downDest - hrp.Position).Magnitude
+    local downDur = math.max(downDist / SAFE_SPEED, 0.05)
+    local downTween = TweenService:Create(hrp, TweenInfo.new(downDur, Enum.EasingStyle.Linear), {CFrame = CFrame.new(downDest)})
+    downTween:Play()
+    downTween.Completed:Wait()
+    task.wait(0.1)
+    local upDest = Vector3.new(hrp.Position.X, UNDERGROUND_Y, hrp.Position.Z)
+    local upDist = (upDest - hrp.Position).Magnitude
+    local upDur = math.max(upDist / SAFE_SPEED, 0.05)
+    local upTween = TweenService:Create(hrp, TweenInfo.new(upDur, Enum.EasingStyle.Linear), {CFrame = CFrame.new(upDest)})
+    upTween:Play()
+    upTween.Completed:Wait()
+    lastGroundTouch = tick()
+    isTouchingGround = false
+end
+
+local function blatantTweenTo(hrp, targetPos, farmCheck)
+    local function makeTween()
+        local dest = Vector3.new(targetPos.X, UNDERGROUND_Y, targetPos.Z)
+        local dist = (dest - hrp.Position).Magnitude
+        if dist < 1 then return nil end
+        local dur = math.max(dist / SAFE_SPEED, 0.05)
+        return TweenService:Create(hrp, TweenInfo.new(dur, Enum.EasingStyle.Linear), {CFrame = CFrame.new(dest)})
+    end
+    local tween = makeTween()
+    if not tween then return end
+    local tweenDone = false
+    tween.Completed:Connect(function() tweenDone = true end)
+    tween:Play()
+    while not tweenDone do
+        task.wait(0.5)
+        if not farmCheck() then tween:Cancel() return end
+        if tick() - lastGroundTouch >= GROUND_TOUCH_INTERVAL and not isTouchingGround then
+            tween:Cancel()
+            touchGround(hrp)
+            tween = makeTween()
+            if not tween then return end
+            tweenDone = false
+            tween.Completed:Connect(function() tweenDone = true end)
+            tween:Play()
         end
-
-        -- Tween underground directly to trash XZ
-        tweenUnderTo(hrp, target)
-
-        -- Stay underground, keep tweening toward target until no players nearby
-        local waitEnd = tick() + (timeout or 20)
-        while isPlayerNearby() and tick() < waitEnd and farmCheck() do
-            -- Keep nudging toward target while waiting underground
-            tweenUnderTo(hrp, target)
-            task.wait(0.2)
-        end
-
-        if not farmCheck() then return false end
-
-        -- Players gone — surface at current XZ
-        surfaceUp(hrp)
-        return true
-    else
-        -- No players nearby — surface if underground then walk normally
-        if isUnderground then surfaceUp(hrp) end
-        return walkTo(hrp, humanoid, target, timeout, blacklistKey, farmCheck)
     end
 end
--- ─────────────────────────────────────────────────────────────────────────────
+
+local function blatantWalkTo(hrp, humanoid, target, timeout, blacklistKey, farmCheck)
+    if not isUnderground then goUnderground(hrp) end
+    blatantTweenTo(hrp, target, farmCheck)
+    local arrived = (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(target.X, 0, target.Z)).Magnitude < 8
+    if not arrived and blacklistKey then trashBlacklist[blacklistKey] = true end
+    return arrived
+end
 
 local function getTrashCount(waitForValid)
     local function read()
@@ -275,44 +287,39 @@ local function getNextAvailableDumpsterTime()
     return soonest or 0
 end
 
--- ── Farm loop ─────────────────────────────────────────────────────────────────
 local function runFarmLoop(farmCheck, blatant)
     local function getChar()
         local c = LocalPlayer.Character
         if not c then return nil, nil end
         return c:FindFirstChild("HumanoidRootPart"), c:FindFirstChild("Humanoid")
     end
-
     local lastTrashCount = -1
     local lastIncreaseTime = tick()
     local hasPickedUpAtLeastOne = false
-
     startAutoSprint(farmCheck)
-    if blatant then startNoclip() end
-
+    if blatant then
+        startNoclip()
+        lastGroundTouch = tick()
+    end
     while farmCheck() do
         local hrp, humanoid = getChar()
         if not hrp or not humanoid then task.wait(1) continue end
-
         local cur, max = getTrashCount(true)
         if cur ~= lastTrashCount then lastTrashCount = cur lastIncreaseTime = tick() end
-
         if tick() - lastIncreaseTime > 10 then
             Rayfield:Notify({ Title = "Trash Farm", Content = "Stuck! Resetting...", Duration = 3 })
             if isUnderground then surfaceUp(hrp) end
             LocalPlayer.Character:BreakJoints()
             task.wait(4)
-            isUnderground = false savedGroundY = nil
+            isUnderground = false
             startAutoSprint(farmCheck)
-            if blatant then startNoclip() end
+            if blatant then startNoclip() lastGroundTouch = tick() end
             lastIncreaseTime = tick() lastTrashCount = -1 hasPickedUpAtLeastOne = false
             continue
         end
-
         if hasPickedUpAtLeastOne and max > 0 and cur >= max then
-            -- Always surface before going to dumpster
             if isUnderground then
-                local h = getChar()
+                local h, _ = getChar()
                 if h then surfaceUp(h) end
             end
             local dumpster = getAvailableDumpster()
@@ -341,7 +348,6 @@ local function runFarmLoop(farmCheck, blatant)
         else
             local hrp2, humanoid2 = getChar()
             if not hrp2 or not humanoid2 then task.wait(1) continue end
-
             local nearest, nearestDist, nearestPrompt, nearestKey = nil, math.huge, nil, nil
             for _, paper in ipairs(workspace.Map.Environment.Trash:GetChildren()) do
                 if trashBlacklist[paper.Name] then continue end
@@ -354,7 +360,6 @@ local function runFarmLoop(farmCheck, blatant)
                     end
                 end
             end
-
             if nearest then
                 local arrived
                 if blatant then
@@ -374,20 +379,16 @@ local function runFarmLoop(farmCheck, blatant)
                 task.wait(3)
             end
         end
-
         task.wait(0.1)
     end
-
-    -- Cleanup
-    if isUnderground then
-        local h = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if h then surfaceUp(h) end
-    end
-    isUnderground = false savedGroundY = nil
     stopAutoSprint()
-    if blatant then stopNoclip() end
+    if blatant then
+        stopNoclip()
+        local h = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if h and isUnderground then surfaceUp(h) end
+        isUnderground = false
+    end
 end
--- ─────────────────────────────────────────────────────────────────────────────
 
 local function doClick()
     pcall(function()
@@ -440,10 +441,14 @@ local function doBurgerRun(manual)
     until (hrp.Position - standPos).Magnitude < 3 or tick() > timeout or manualCancelled
     if not manualCancelled then
         randomWait(0.4, 0.9)
+        local bought = false
         local ok, vendor = pcall(function() return workspace.Map["Food Vendors"]:GetChildren()[11] end)
         if ok and vendor then
             local prompt = vendor.Counter["Prompt Host"].Prompt
-            if prompt then fireproximityprompt(prompt) end
+            if prompt and not bought then
+                bought = true
+                fireproximityprompt(prompt)
+            end
         end
         if not isManualRun then
             randomWait(2.8, 3.4)
@@ -472,7 +477,10 @@ local function onAutoPerfectLaunch(value)
             local tracker = bar:FindFirstChild("Tracker")
             if not goal or not tracker then return end
             local tc = tracker.AbsolutePosition.X + tracker.AbsoluteSize.X / 2
-            if tc > goal.AbsolutePosition.X and tc < goal.AbsolutePosition.X + goal.AbsoluteSize.X then
+            local goalCenter = goal.AbsolutePosition.X + goal.AbsoluteSize.X / 2
+            local goalHalf = goal.AbsoluteSize.X / 2
+            local threshold = goalHalf * 0.4
+            if math.abs(tc - goalCenter) < threshold then
                 lastClick = now doClick()
             end
         end)
@@ -482,33 +490,6 @@ local function onAutoPerfectLaunch(value)
 end
 toggleCallbacks["AutoPerfectLaunch"] = onAutoPerfectLaunch
 MainTab:CreateToggle({ Name = "Auto Perfect Launch", CurrentValue = false, Flag = "AutoPerfectLaunch", Callback = onAutoPerfectLaunch })
-
-local goodEnoughConnection
-MainTab:CreateToggle({
-    Name = "Auto Good Enough Launch",
-    CurrentValue = false,
-    Flag = "AutoGoodEnoughLaunch",
-    Callback = function(value)
-        if value then
-            goodEnoughConnection = RunService.Heartbeat:Connect(function()
-                local now = tick()
-                if now - lastClick < COOLDOWN then return end
-                local bar = getBar() if not bar then return end
-                local tracker = bar:FindFirstChild("Tracker") if not tracker then return end
-                local tc = tracker.AbsolutePosition.X + tracker.AbsoluteSize.X / 2
-                for _, child in ipairs(bar:GetChildren()) do
-                    if child.Name == "Side" then
-                        if tc > child.AbsolutePosition.X and tc < child.AbsolutePosition.X + child.AbsoluteSize.X then
-                            lastClick = now doClick() break
-                        end
-                    end
-                end
-            end)
-        else
-            if goodEnoughConnection then goodEnoughConnection:Disconnect() goodEnoughConnection = nil end
-        end
-    end,
-})
 
 local lastBuy = 0
 local BUYCOOLDOWN = 8
@@ -556,18 +537,115 @@ local function onAutoTrashBlatant(value)
     else
         blatantFarmRunning = false
         stopAutoSprint() stopNoclip()
-        if isUnderground then
-            local h = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if h then surfaceUp(h) end
-            isUnderground = false savedGroundY = nil
-        end
+        local h = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if h and isUnderground then surfaceUp(h) end
+        isUnderground = false
         Rayfield:Notify({ Title = "Trash Farm", Content = "Blatant trash farm stopped.", Duration = 3 })
     end
 end
 toggleCallbacks["AutoTrashFarmBlatant"] = onAutoTrashBlatant
 MainTab:CreateToggle({ Name = "Auto Trash Farm (Blatant)", CurrentValue = false, Flag = "AutoTrashFarmBlatant", Callback = onAutoTrashBlatant })
 
--- ── Meteor ESP ────────────────────────────────────────────────────────────────
+-- ── ESP Tab ───────────────────────────────────────────────────────────────────
+local ESPTab = Window:CreateTab("ESP", 4483362458)
+
+local playerESPEnabled = false
+local playerESPConnections = {}
+local playerESPHighlights = {}
+
+local function removePlayerESP(player)
+    if playerESPHighlights[player] then
+        playerESPHighlights[player]:Destroy()
+        playerESPHighlights[player] = nil
+    end
+    if player.Character then
+        local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local bb = hrp:FindFirstChild("PlayerESPBB")
+            if bb then bb:Destroy() end
+        end
+    end
+end
+
+local function applyPlayerESP(player)
+    if player == LocalPlayer then return end
+    local char = player.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    if not playerESPHighlights[player] then
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "PlayerESPHighlight"
+        highlight.FillColor = Color3.fromRGB(255, 0, 0)
+        highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
+        highlight.FillTransparency = 0.3
+        highlight.OutlineTransparency = 0
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        highlight.Adornee = char
+        highlight.Parent = char
+        playerESPHighlights[player] = highlight
+    end
+    if not hrp:FindFirstChild("PlayerESPBB") then
+        local bb = Instance.new("BillboardGui")
+        bb.Name = "PlayerESPBB"
+        bb.AlwaysOnTop = true
+        bb.Size = UDim2.new(0, 150, 0, 50)
+        bb.StudsOffset = Vector3.new(0, 3.5, 0)
+        bb.Adornee = hrp
+        bb.Parent = hrp
+        local label = Instance.new("TextLabel")
+        label.BackgroundTransparency = 1
+        label.Size = UDim2.new(1, 0, 1, 0)
+        label.Font = Enum.Font.GothamBold
+        label.TextSize = 16
+        label.TextColor3 = Color3.fromRGB(255, 80, 80)
+        label.TextStrokeTransparency = 0
+        label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        label.Text = player.DisplayName .. "\n(@" .. player.Name .. ")"
+        label.Parent = bb
+    end
+end
+
+local function setupPlayerESP(player)
+    if player == LocalPlayer then return end
+    if player.Character then applyPlayerESP(player) end
+    local conn = player.CharacterAdded:Connect(function()
+        task.wait(0.5)
+        if playerESPEnabled then applyPlayerESP(player) end
+    end)
+    playerESPConnections[player] = conn
+end
+
+local function startPlayerESP()
+    for _, p in ipairs(Players:GetPlayers()) do setupPlayerESP(p) end
+    playerESPConnections["PlayerAdded"] = Players.PlayerAdded:Connect(function(p)
+        task.wait(0.5)
+        if playerESPEnabled then setupPlayerESP(p) end
+    end)
+end
+
+local function stopPlayerESP()
+    for _, conn in pairs(playerESPConnections) do conn:Disconnect() end
+    playerESPConnections = {}
+    for _, p in ipairs(Players:GetPlayers()) do removePlayerESP(p) end
+    playerESPHighlights = {}
+end
+
+ESPTab:CreateSection("Player ESP")
+local function onPlayerESP(value)
+    toggleStates.PlayerESP = value
+    playerESPEnabled = value
+    if value then
+        startPlayerESP()
+        Rayfield:Notify({ Title = "Player ESP", Content = "Enabled!", Duration = 3 })
+    else
+        stopPlayerESP()
+        Rayfield:Notify({ Title = "Player ESP", Content = "Disabled.", Duration = 3 })
+    end
+end
+toggleCallbacks["PlayerESP"] = onPlayerESP
+ESPTab:CreateToggle({ Name = "Player ESP", CurrentValue = false, Flag = "PlayerESP", Callback = onPlayerESP })
+
 local meteorESPEnabled = false
 local meteorAddedConnection = nil
 local meteorRemovedConnections = {}
@@ -623,7 +701,6 @@ local function stopMeteorESP()
     removeAllMeteorESP()
 end
 
-local ESPTab = Window:CreateTab("ESP", 4483362458)
 ESPTab:CreateSection("Meteor ESP")
 local function onMeteorESP(value)
     toggleStates.MeteorESP = value meteorESPEnabled = value
@@ -697,6 +774,7 @@ local function getCurrentFlags()
         AutoTrashFarm        = toggleStates.AutoTrashFarm,
         AutoTrashFarmBlatant = toggleStates.AutoTrashFarmBlatant,
         MeteorESP            = toggleStates.MeteorESP,
+        PlayerESP            = toggleStates.PlayerESP,
     }
 end
 local function applyFlags(flags)
