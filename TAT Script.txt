@@ -1,5 +1,53 @@
+-- ── Pre-load config BEFORE building UI so CurrentValue is correct from the start ──
+local HttpService = game:GetService("HttpService")
+local CONFIG_FILE = "TAT_Configs.json"
+
+local function loadAllConfigs()
+    local ok, data = pcall(function() return readfile(CONFIG_FILE) end)
+    if not ok or not data or data == "" then return {} end
+    local ok2, parsed = pcall(function() return HttpService:JSONDecode(data) end)
+    if ok2 and type(parsed) == "table" then return parsed end
+    return {}
+end
+
+local function saveAllConfigs(configs)
+    local ok, encoded = pcall(function() return HttpService:JSONEncode(configs) end)
+    if not ok then return false end
+    local ok2 = pcall(function() writefile(CONFIG_FILE, encoded) end)
+    return ok2
+end
+
+-- Read the autoLoad config right now, before anything else
+local startFlags = {
+    AutoLaunchCycle      = false,
+    AutoPerfectLaunch    = false,
+    AutoBuyBurger        = false,
+    AutoTrashFarm        = false,
+    AutoTrashFarmBlatant = false,
+    MeteorESP            = false,
+    PlayerESP            = false,
+    AutoStateKeeper      = false,
+    AntiAFK              = false,
+}
+local autoLoadConfigName = nil
+do
+    local configs = loadAllConfigs()
+    for name, cfg in pairs(configs) do
+        if cfg.autoLoad and cfg.flags then
+            autoLoadConfigName = name
+            for flag, val in pairs(cfg.flags) do
+                if startFlags[flag] ~= nil then
+                    startFlags[flag] = val
+                end
+            end
+            break
+        end
+    end
+end
+
+-- ── Rayfield ──────────────────────────────────────────────────────────────────
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
- 
+
 local Window = Rayfield:CreateWindow({
    Name = "Totally Accurate Tops",
    Icon = 0,
@@ -9,10 +57,10 @@ local Window = Rayfield:CreateWindow({
    DisableRayfieldPrompts = true,
    DisableBuildWarnings = true,
 })
- 
+
 local MainTab = Window:CreateTab("Main", 4483362458)
 local MainSection = MainTab:CreateSection("Automations")
- 
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -23,17 +71,20 @@ local LocalPlayer = Players.LocalPlayer
 local playerGui = LocalPlayer:WaitForChild("PlayerGui")
 local lastClick = 0
 local COOLDOWN = 0.5
- 
+
 local perfectConnection
 local autoEnergyConnection
 
 local toggleStates = {
+    AutoLaunchCycle      = false,
     AutoPerfectLaunch    = false,
     AutoBuyBurger        = false,
     AutoTrashFarm        = false,
     AutoTrashFarmBlatant = false,
     MeteorESP            = false,
     PlayerESP            = false,
+    AutoStateKeeper      = false,
+    AntiAFK              = false,
 }
 local toggleCallbacks = {}
 
@@ -55,6 +106,9 @@ local isTouchingGround = false
 local isUnderground = false
 
 local PLAYER_RADIUS = 100
+
+local autoLaunchRunning = false
+local isDoingLaunchCycle = false
 
 local function isPlayerNearby()
     local char = LocalPlayer.Character
@@ -142,7 +196,7 @@ local function walkTo(hrp, humanoid, target, timeout, blacklistKey, farmCheck)
     local startPos = hrp.Position
     repeat
         task.wait(0.3)
-        if not farmCheck() then return false end
+        if farmCheck and not farmCheck() then return false end
         checkStuck(hrp, humanoid, target) maybeJump(humanoid)
     until (hrp.Position - target).Magnitude < 8 or tick() > t
     local arrived = (hrp.Position - target).Magnitude < 8
@@ -158,8 +212,7 @@ local function goUnderground(hrp)
     local dist = (dest - hrp.Position).Magnitude
     local dur = math.max(dist / SAFE_SPEED, 0.05)
     local tween = TweenService:Create(hrp, TweenInfo.new(dur, Enum.EasingStyle.Linear), {CFrame = CFrame.new(dest)})
-    tween:Play()
-    tween.Completed:Wait()
+    tween:Play() tween.Completed:Wait()
     isUnderground = true
 end
 
@@ -169,8 +222,7 @@ local function surfaceUp(hrp)
     local dist = (dest - hrp.Position).Magnitude
     local dur = math.max(dist / SAFE_SPEED, 0.05)
     local tween = TweenService:Create(hrp, TweenInfo.new(dur, Enum.EasingStyle.Linear), {CFrame = CFrame.new(dest)})
-    tween:Play()
-    tween.Completed:Wait()
+    tween:Play() tween.Completed:Wait()
     isUnderground = false
 end
 
@@ -178,20 +230,14 @@ local function touchGround(hrp)
     if isTouchingGround then return end
     isTouchingGround = true
     local downDest = Vector3.new(hrp.Position.X, GROUND_Y, hrp.Position.Z)
-    local downDist = (downDest - hrp.Position).Magnitude
-    local downDur = math.max(downDist / SAFE_SPEED, 0.05)
+    local downDur = math.max((downDest - hrp.Position).Magnitude / SAFE_SPEED, 0.05)
     local downTween = TweenService:Create(hrp, TweenInfo.new(downDur, Enum.EasingStyle.Linear), {CFrame = CFrame.new(downDest)})
-    downTween:Play()
-    downTween.Completed:Wait()
-    task.wait(0.1)
+    downTween:Play() downTween.Completed:Wait() task.wait(0.1)
     local upDest = Vector3.new(hrp.Position.X, UNDERGROUND_Y, hrp.Position.Z)
-    local upDist = (upDest - hrp.Position).Magnitude
-    local upDur = math.max(upDist / SAFE_SPEED, 0.05)
+    local upDur = math.max((upDest - hrp.Position).Magnitude / SAFE_SPEED, 0.05)
     local upTween = TweenService:Create(hrp, TweenInfo.new(upDur, Enum.EasingStyle.Linear), {CFrame = CFrame.new(upDest)})
-    upTween:Play()
-    upTween.Completed:Wait()
-    lastGroundTouch = tick()
-    isTouchingGround = false
+    upTween:Play() upTween.Completed:Wait()
+    lastGroundTouch = tick() isTouchingGround = false
 end
 
 local function blatantTweenTo(hrp, targetPos, farmCheck)
@@ -202,22 +248,17 @@ local function blatantTweenTo(hrp, targetPos, farmCheck)
         local dur = math.max(dist / SAFE_SPEED, 0.05)
         return TweenService:Create(hrp, TweenInfo.new(dur, Enum.EasingStyle.Linear), {CFrame = CFrame.new(dest)})
     end
-    local tween = makeTween()
-    if not tween then return end
+    local tween = makeTween() if not tween then return end
     local tweenDone = false
-    tween.Completed:Connect(function() tweenDone = true end)
-    tween:Play()
+    tween.Completed:Connect(function() tweenDone = true end) tween:Play()
     while not tweenDone do
         task.wait(0.5)
         if not farmCheck() then tween:Cancel() return end
         if tick() - lastGroundTouch >= GROUND_TOUCH_INTERVAL and not isTouchingGround then
-            tween:Cancel()
-            touchGround(hrp)
-            tween = makeTween()
-            if not tween then return end
+            tween:Cancel() touchGround(hrp)
+            tween = makeTween() if not tween then return end
             tweenDone = false
-            tween.Completed:Connect(function() tweenDone = true end)
-            tween:Play()
+            tween.Completed:Connect(function() tweenDone = true end) tween:Play()
         end
     end
 end
@@ -297,10 +338,7 @@ local function runFarmLoop(farmCheck, blatant)
     local lastIncreaseTime = tick()
     local hasPickedUpAtLeastOne = false
     startAutoSprint(farmCheck)
-    if blatant then
-        startNoclip()
-        lastGroundTouch = tick()
-    end
+    if blatant then startNoclip() lastGroundTouch = tick() end
     while farmCheck() do
         local hrp, humanoid = getChar()
         if not hrp or not humanoid then task.wait(1) continue end
@@ -310,18 +348,14 @@ local function runFarmLoop(farmCheck, blatant)
             Rayfield:Notify({ Title = "Trash Farm", Content = "Stuck! Resetting...", Duration = 3 })
             if isUnderground then surfaceUp(hrp) end
             LocalPlayer.Character:BreakJoints()
-            task.wait(4)
-            isUnderground = false
+            task.wait(4) isUnderground = false
             startAutoSprint(farmCheck)
             if blatant then startNoclip() lastGroundTouch = tick() end
             lastIncreaseTime = tick() lastTrashCount = -1 hasPickedUpAtLeastOne = false
             continue
         end
         if hasPickedUpAtLeastOne and max > 0 and cur >= max then
-            if isUnderground then
-                local h, _ = getChar()
-                if h then surfaceUp(h) end
-            end
+            if isUnderground then local h, _ = getChar() if h then surfaceUp(h) end end
             local dumpster = getAvailableDumpster()
             if dumpster then
                 local arrived = walkTo(hrp, humanoid, dumpster.pos, 30, nil, farmCheck)
@@ -329,8 +363,7 @@ local function runFarmLoop(farmCheck, blatant)
                     randomWait(0.3, 0.7)
                     local prompt = dumpster.part:FindFirstChild("Prompt")
                     if prompt then
-                        fireproximityprompt(prompt, 2)
-                        task.wait(2)
+                        fireproximityprompt(prompt, 2) task.wait(2)
                         trashBlacklist = {} lastTrashCount = -1
                         lastIncreaseTime = tick() hasPickedUpAtLeastOne = false
                     end
@@ -390,6 +423,86 @@ local function runFarmLoop(farmCheck, blatant)
     end
 end
 
+-- ── Bey functions ─────────────────────────────────────────────────────────────
+local function getMyTop()
+    return workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
+end
+
+local function topNeedsPickup()
+    local top = getMyTop()
+    if not top then return false end
+    local target = top:FindFirstChild("Target")
+    return target ~= nil and target.Value == nil
+end
+
+local function getTopPosition()
+    local top = getMyTop()
+    if not top then return nil end
+    return top:GetPivot().Position
+end
+
+local function pressKey(key)
+    VirtualInputManager:SendKeyEvent(true, key, false, game)
+    task.wait(0.05)
+    VirtualInputManager:SendKeyEvent(false, key, false, game)
+end
+
+local function doAutoLaunchCycle()
+    if isDoingLaunchCycle then return end
+    isDoingLaunchCycle = true
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character and character:FindFirstChild("Humanoid")
+    if not hrp or not humanoid then isDoingLaunchCycle = false return end
+    local standCFrame = hrp.CFrame
+    print("Deploying bey...")
+    pressKey(Enum.KeyCode.E)
+    task.wait(0.5)
+    print("Triggering launch...")
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+    task.wait(0.05)
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+    task.wait(2)
+    print("Waiting for bey to need pickup...")
+    local timeout = tick() + 120
+    repeat
+        task.wait(0.5)
+        if not autoLaunchRunning then isDoingLaunchCycle = false return end
+    until topNeedsPickup() or tick() > timeout
+    if not autoLaunchRunning then isDoingLaunchCycle = false return end
+    if not topNeedsPickup() then print("Timed out waiting for bey") isDoingLaunchCycle = false return end
+    local topPos = getTopPosition()
+    if not topPos then isDoingLaunchCycle = false return end
+    print("Walking to bey...")
+    stuckCount = 0 lastPos = nil
+    humanoid:MoveTo(topPos)
+    local walkTimeout = tick() + 25
+    repeat
+        task.wait(0.3)
+        if not autoLaunchRunning then isDoingLaunchCycle = false return end
+        local newPos = getTopPosition()
+        if newPos then topPos = newPos humanoid:MoveTo(topPos) end
+        checkStuck(hrp, humanoid, topPos) maybeJump(humanoid)
+    until (hrp.Position - (getTopPosition() or topPos)).Magnitude < 5 or tick() > walkTimeout
+    task.wait(0.3)
+    print("Picking up bey...")
+    pressKey(Enum.KeyCode.E)
+    task.wait(0.5)
+    print("Walking back...")
+    stuckCount = 0 lastPos = nil
+    humanoid:MoveTo(standCFrame.Position)
+    local returnTimeout = tick() + 20
+    repeat
+        task.wait(0.3)
+        if not autoLaunchRunning then isDoingLaunchCycle = false return end
+        checkStuck(hrp, humanoid, standCFrame.Position) maybeJump(humanoid)
+    until (hrp.Position - standCFrame.Position).Magnitude < 3 or tick() > returnTimeout
+    hrp.CFrame = standCFrame
+    print("Cycle complete, repeating...")
+    isDoingLaunchCycle = false
+    if autoLaunchRunning then task.wait(0.3) task.spawn(doAutoLaunchCycle) end
+end
+
 local function doClick()
     pcall(function()
         VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
@@ -445,10 +558,7 @@ local function doBurgerRun(manual)
         local ok, vendor = pcall(function() return workspace.Map["Food Vendors"]:GetChildren()[11] end)
         if ok and vendor then
             local prompt = vendor.Counter["Prompt Host"].Prompt
-            if prompt and not bought then
-                bought = true
-                fireproximityprompt(prompt)
-            end
+            if prompt and not bought then bought = true fireproximityprompt(prompt) end
         end
         if not isManualRun then
             randomWait(2.8, 3.4)
@@ -465,13 +575,29 @@ local function doBurgerRun(manual)
     isBurgerBuying = false isManualRun = false manualCancelled = false
 end
 
--- ── Toggles ───────────────────────────────────────────────────────────────────
+-- ── Toggles — CurrentValue uses startFlags so sliders are correct on load ─────
+
+local function onAutoLaunchCycle(value)
+    toggleStates.AutoLaunchCycle = value
+    autoLaunchRunning = value
+    if value then
+        task.spawn(doAutoLaunchCycle)
+        Rayfield:Notify({ Title = "Auto Launch", Content = "Auto launch cycle started!", Duration = 3 })
+    else
+        isDoingLaunchCycle = false
+        Rayfield:Notify({ Title = "Auto Launch", Content = "Auto launch stopped.", Duration = 3 })
+    end
+end
+toggleCallbacks["AutoLaunchCycle"] = onAutoLaunchCycle
+MainTab:CreateToggle({ Name = "Auto Launch Cycle", CurrentValue = startFlags.AutoLaunchCycle, Flag = "AutoLaunchCycle", Callback = onAutoLaunchCycle })
+if startFlags.AutoLaunchCycle then onAutoLaunchCycle(true) end
+
 local function onAutoPerfectLaunch(value)
     toggleStates.AutoPerfectLaunch = value
+    if perfectConnection then perfectConnection:Disconnect() perfectConnection = nil end
     if value then
         local passCount = 0
         local wasInZone = false
-
         perfectConnection = RunService.Heartbeat:Connect(function()
             local now = tick()
             if now - lastClick < COOLDOWN then return end
@@ -479,35 +605,94 @@ local function onAutoPerfectLaunch(value)
             local goal    = bar:FindFirstChild("Goal")
             local tracker = bar:FindFirstChild("Tracker")
             if not goal or not tracker then return end
-
             local tc = tracker.AbsolutePosition.X + tracker.AbsoluteSize.X / 2
             local goalCenter = goal.AbsolutePosition.X + goal.AbsoluteSize.X / 2
             local goalHalf = goal.AbsoluteSize.X / 2
             local threshold = goalHalf * 0.4
-
             local inZone = math.abs(tc - goalCenter) < threshold
-
-            if inZone and not wasInZone then
-                passCount = passCount + 1
-            end
-
+            if inZone and not wasInZone then passCount = passCount + 1 end
             wasInZone = inZone
-
             if inZone and passCount >= 2 then
-                passCount = 0
-                lastClick = now
-                doClick()
+                passCount = 0 lastClick = now doClick()
             end
         end)
-    else
-        if perfectConnection then perfectConnection:Disconnect() perfectConnection = nil end
     end
 end
 toggleCallbacks["AutoPerfectLaunch"] = onAutoPerfectLaunch
-MainTab:CreateToggle({ Name = "Auto Perfect Launch", CurrentValue = false, Flag = "AutoPerfectLaunch", Callback = onAutoPerfectLaunch })
+MainTab:CreateToggle({ Name = "Auto Perfect Launch", CurrentValue = startFlags.AutoPerfectLaunch, Flag = "AutoPerfectLaunch", Callback = onAutoPerfectLaunch })
+if startFlags.AutoPerfectLaunch then onAutoPerfectLaunch(true) end
 
+-- ── Auto State Keeper ─────────────────────────────────────────────────────────
+-- Cycle: Attacking -> Guarding -> Idle -> Attacking
+-- From Idle: 1x G = Attacking, 2x G = Guarding
+local preferredState = "Attacking"
+local stateKeeperConnection = nil
+local isFixingState = false
+
+local function getStateKeeperLabel()
+    local ok, label = pcall(function()
+        return playerGui.HUD["Top UI"].Info.Top.State
+    end)
+    if ok and label then return label end
+    return nil
+end
+
+local function pressG()
+    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.G, false, game)
+    task.wait(0.05)
+    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.G, false, game)
+end
+
+local function onAutoStateKeeper(value)
+    toggleStates.AutoStateKeeper = value
+    if value then
+        stateKeeperConnection = RunService.Heartbeat:Connect(function()
+            if isFixingState then return end
+            local label = getStateKeeperLabel()
+            if not label then return end
+            local state = label.Text
+            if state:find("Recalling") then return end
+            if not state:find("Idle") then return end
+            isFixingState = true
+            task.spawn(function()
+                -- From Idle: press G once to reach Attacking, twice to reach Guarding
+                local presses = preferredState == "Guarding" and 2 or 1
+                for _ = 1, presses do
+                    pressG()
+                    task.wait(0.3)
+                end
+                isFixingState = false
+            end)
+        end)
+        Rayfield:Notify({ Title = "State Keeper", Content = "Keeping state: " .. preferredState, Duration = 3 })
+    else
+        if stateKeeperConnection then stateKeeperConnection:Disconnect() stateKeeperConnection = nil end
+        isFixingState = false
+        Rayfield:Notify({ Title = "State Keeper", Content = "State keeper stopped.", Duration = 3 })
+    end
+end
+toggleCallbacks["AutoStateKeeper"] = onAutoStateKeeper
+MainTab:CreateToggle({ Name = "Auto State Keeper", CurrentValue = startFlags.AutoStateKeeper, Flag = "AutoStateKeeper", Callback = onAutoStateKeeper })
+if startFlags.AutoStateKeeper then onAutoStateKeeper(true) end
+
+MainTab:CreateDropdown({
+    Name = "Preferred State",
+    Options = { "Attacking", "Guarding" },
+    CurrentOption = { "Attacking" },
+    Flag = "PreferredState",
+    MultipleOptions = false,
+    Callback = function(s)
+        preferredState = type(s) == "table" and s[1] or s
+        if toggleStates.AutoStateKeeper then
+            Rayfield:Notify({ Title = "State Keeper", Content = "Now keeping: " .. preferredState, Duration = 2 })
+        end
+    end,
+})
+
+-- ── Burger ────────────────────────────────────────────────────────────────────
 local lastBuy = 0
 local BUYCOOLDOWN = 8
+
 local function onAutoEatBurger(value)
     toggleStates.AutoBuyBurger = value
     if value then
@@ -523,7 +708,9 @@ local function onAutoEatBurger(value)
     end
 end
 toggleCallbacks["AutoBuyBurger"] = onAutoEatBurger
-MainTab:CreateToggle({ Name = "Auto Eat Burger (AFK)", CurrentValue = false, Flag = "AutoBuyBurger", Callback = onAutoEatBurger })
+MainTab:CreateToggle({ Name = "Auto Eat Burger (AFK)", CurrentValue = startFlags.AutoBuyBurger, Flag = "AutoBuyBurger", Callback = onAutoEatBurger })
+if startFlags.AutoBuyBurger then onAutoEatBurger(true) end
+
 MainTab:CreateButton({ Name = "Get Burger", Callback = function()
     if not isBurgerBuying then task.spawn(function() doBurgerRun(true) end)
     else Rayfield:Notify({ Title = "Burger Run", Content = "Already on a burger run!", Duration = 2 }) end
@@ -542,7 +729,8 @@ local function onAutoTrashLegit(value)
     end
 end
 toggleCallbacks["AutoTrashFarm"] = onAutoTrashLegit
-MainTab:CreateToggle({ Name = "Auto Trash Farm (Legit)", CurrentValue = false, Flag = "AutoTrashFarm", Callback = onAutoTrashLegit })
+MainTab:CreateToggle({ Name = "Auto Trash Farm (Legit)", CurrentValue = startFlags.AutoTrashFarm, Flag = "AutoTrashFarm", Callback = onAutoTrashLegit })
+if startFlags.AutoTrashFarm then onAutoTrashLegit(true) end
 
 local function onAutoTrashBlatant(value)
     toggleStates.AutoTrashFarmBlatant = value blatantFarmRunning = value
@@ -550,8 +738,7 @@ local function onAutoTrashBlatant(value)
         task.spawn(function() runFarmLoop(function() return blatantFarmRunning end, true) end)
         Rayfield:Notify({ Title = "Trash Farm", Content = "Blatant trash farm started!", Duration = 3 })
     else
-        blatantFarmRunning = false
-        stopAutoSprint() stopNoclip()
+        blatantFarmRunning = false stopAutoSprint() stopNoclip()
         local h = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if h and isUnderground then surfaceUp(h) end
         isUnderground = false
@@ -559,7 +746,8 @@ local function onAutoTrashBlatant(value)
     end
 end
 toggleCallbacks["AutoTrashFarmBlatant"] = onAutoTrashBlatant
-MainTab:CreateToggle({ Name = "Auto Trash Farm (Blatant)", CurrentValue = false, Flag = "AutoTrashFarmBlatant", Callback = onAutoTrashBlatant })
+MainTab:CreateToggle({ Name = "Auto Trash Farm (Blatant)", CurrentValue = startFlags.AutoTrashFarmBlatant, Flag = "AutoTrashFarmBlatant", Callback = onAutoTrashBlatant })
+if startFlags.AutoTrashFarmBlatant then onAutoTrashBlatant(true) end
 
 -- ── ESP Tab ───────────────────────────────────────────────────────────────────
 local ESPTab = Window:CreateTab("ESP", 4483362458)
@@ -569,64 +757,62 @@ local playerESPConnections = {}
 local playerESPHighlights = {}
 
 local function removePlayerESP(player)
-    if playerESPHighlights[player] then
-        playerESPHighlights[player]:Destroy()
-        playerESPHighlights[player] = nil
-    end
+    if playerESPHighlights[player] then playerESPHighlights[player]:Destroy() playerESPHighlights[player] = nil end
     if player.Character then
         local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            local bb = hrp:FindFirstChild("PlayerESPBB")
-            if bb then bb:Destroy() end
-        end
+        if hrp then local bb = hrp:FindFirstChild("PlayerESPBB") if bb then bb:Destroy() end end
     end
 end
 
 local function applyPlayerESP(player)
     if player == LocalPlayer then return end
-    local char = player.Character
-    if not char then return end
+    local char = player.Character if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then
+        local deadline = tick() + 3
+        repeat task.wait(0.1) hrp = char:FindFirstChild("HumanoidRootPart") until hrp or tick() > deadline
+    end
     if not hrp then return end
-    if not playerESPHighlights[player] then
-        local highlight = Instance.new("Highlight")
-        highlight.Name = "PlayerESPHighlight"
-        highlight.FillColor = Color3.fromRGB(255, 0, 0)
-        highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
-        highlight.FillTransparency = 0.3
-        highlight.OutlineTransparency = 0
-        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        highlight.Adornee = char
-        highlight.Parent = char
-        playerESPHighlights[player] = highlight
+    local old = char:FindFirstChild("PlayerESPHighlight")
+    if old then old:Destroy() end
+    if playerESPHighlights[player] then
+        pcall(function() playerESPHighlights[player]:Destroy() end)
+        playerESPHighlights[player] = nil
     end
-    if not hrp:FindFirstChild("PlayerESPBB") then
-        local bb = Instance.new("BillboardGui")
-        bb.Name = "PlayerESPBB"
-        bb.AlwaysOnTop = true
-        bb.Size = UDim2.new(0, 150, 0, 50)
-        bb.StudsOffset = Vector3.new(0, 3.5, 0)
-        bb.Adornee = hrp
-        bb.Parent = hrp
-        local label = Instance.new("TextLabel")
-        label.BackgroundTransparency = 1
-        label.Size = UDim2.new(1, 0, 1, 0)
-        label.Font = Enum.Font.GothamBold
-        label.TextSize = 16
-        label.TextColor3 = Color3.fromRGB(255, 80, 80)
-        label.TextStrokeTransparency = 0
-        label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-        label.Text = player.DisplayName .. "\n(@" .. player.Name .. ")"
-        label.Parent = bb
-    end
+    local oldBB = hrp:FindFirstChild("PlayerESPBB")
+    if oldBB then oldBB:Destroy() end
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "PlayerESPHighlight"
+    highlight.FillColor = Color3.fromRGB(255, 0, 0)
+    highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
+    highlight.FillTransparency = 0.3
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Adornee = char
+    highlight.Parent = char
+    playerESPHighlights[player] = highlight
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "PlayerESPBB" bb.AlwaysOnTop = true
+    bb.Size = UDim2.new(0, 150, 0, 50) bb.StudsOffset = Vector3.new(0, 3.5, 0)
+    bb.Adornee = hrp bb.Parent = hrp
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1 label.Size = UDim2.new(1, 0, 1, 0)
+    label.Font = Enum.Font.GothamBold label.TextSize = 16
+    label.TextColor3 = Color3.fromRGB(255, 80, 80)
+    label.TextStrokeTransparency = 0 label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    label.Text = player.DisplayName .. "\n(@" .. player.Name .. ")"
+    label.Parent = bb
 end
 
 local function setupPlayerESP(player)
     if player == LocalPlayer then return end
-    if player.Character then applyPlayerESP(player) end
+    if playerESPConnections[player] then
+        playerESPConnections[player]:Disconnect()
+        playerESPConnections[player] = nil
+    end
+    if player.Character then task.spawn(function() applyPlayerESP(player) end) end
     local conn = player.CharacterAdded:Connect(function()
-        task.wait(0.5)
-        if playerESPEnabled then applyPlayerESP(player) end
+        task.wait(0.5) applyPlayerESP(player)
     end)
     playerESPConnections[player] = conn
 end
@@ -634,8 +820,7 @@ end
 local function startPlayerESP()
     for _, p in ipairs(Players:GetPlayers()) do setupPlayerESP(p) end
     playerESPConnections["PlayerAdded"] = Players.PlayerAdded:Connect(function(p)
-        task.wait(0.5)
-        if playerESPEnabled then setupPlayerESP(p) end
+        task.wait(0.5) setupPlayerESP(p)
     end)
 end
 
@@ -648,18 +833,13 @@ end
 
 ESPTab:CreateSection("Player ESP")
 local function onPlayerESP(value)
-    toggleStates.PlayerESP = value
-    playerESPEnabled = value
-    if value then
-        startPlayerESP()
-        Rayfield:Notify({ Title = "Player ESP", Content = "Enabled!", Duration = 3 })
-    else
-        stopPlayerESP()
-        Rayfield:Notify({ Title = "Player ESP", Content = "Disabled.", Duration = 3 })
-    end
+    toggleStates.PlayerESP = value playerESPEnabled = value
+    if value then startPlayerESP() Rayfield:Notify({ Title = "Player ESP", Content = "Enabled!", Duration = 3 })
+    else stopPlayerESP() Rayfield:Notify({ Title = "Player ESP", Content = "Disabled.", Duration = 3 }) end
 end
 toggleCallbacks["PlayerESP"] = onPlayerESP
-ESPTab:CreateToggle({ Name = "Player ESP", CurrentValue = false, Flag = "PlayerESP", Callback = onPlayerESP })
+ESPTab:CreateToggle({ Name = "Player ESP", CurrentValue = startFlags.PlayerESP, Flag = "PlayerESP", Callback = onPlayerESP })
+if startFlags.PlayerESP then onPlayerESP(true) end
 
 local meteorESPEnabled = false
 local meteorAddedConnection = nil
@@ -707,7 +887,13 @@ end
 local function startMeteorESP()
     for _, meteor in ipairs(workspace.Map.Meteors:GetChildren()) do createMeteorESP(meteor) end
     meteorAddedConnection = workspace.Map.Meteors.ChildAdded:Connect(function(meteor)
-        if meteorESPEnabled then task.wait(0.2) createMeteorESP(meteor) end
+        if not meteorESPEnabled then return end
+        local core = meteor:FindFirstChild("Core")
+        if not core then
+            local deadline = tick() + 3
+            repeat task.wait(0.1) core = meteor:FindFirstChild("Core") until core or tick() > deadline
+        end
+        if core then createMeteorESP(meteor) end
     end)
 end
 
@@ -719,19 +905,48 @@ end
 ESPTab:CreateSection("Meteor ESP")
 local function onMeteorESP(value)
     toggleStates.MeteorESP = value meteorESPEnabled = value
-    if value then
-        startMeteorESP()
-        Rayfield:Notify({ Title = "Meteor ESP", Content = "Enabled!", Duration = 3 })
-    else
-        stopMeteorESP()
-        Rayfield:Notify({ Title = "Meteor ESP", Content = "Disabled.", Duration = 3 })
-    end
+    if value then startMeteorESP() Rayfield:Notify({ Title = "Meteor ESP", Content = "Enabled!", Duration = 3 })
+    else stopMeteorESP() Rayfield:Notify({ Title = "Meteor ESP", Content = "Disabled.", Duration = 3 }) end
 end
 toggleCallbacks["MeteorESP"] = onMeteorESP
-ESPTab:CreateToggle({ Name = "Meteor ESP", CurrentValue = false, Flag = "MeteorESP", Callback = onMeteorESP })
+ESPTab:CreateToggle({ Name = "Meteor ESP", CurrentValue = startFlags.MeteorESP, Flag = "MeteorESP", Callback = onMeteorESP })
+if startFlags.MeteorESP then onMeteorESP(true) end
 
--- ── Misc ──────────────────────────────────────────────────────────────────────
+-- ── Misc Tab ──────────────────────────────────────────────────────────────────
 local MiscTab = Window:CreateTab("Misc", 4483362458)
+
+MiscTab:CreateSection("Anti AFK")
+local antiAFKConnection = nil
+local idledConnection = nil
+
+local function onAntiAFK(value)
+    toggleStates.AntiAFK = value
+    if value then
+        antiAFKConnection = RunService.Heartbeat:Connect(function()
+            if tick() % 60 < 0.05 then
+                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.W, false, game)
+                task.wait(0.05)
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.W, false, game)
+            end
+        end)
+        pcall(function()
+            idledConnection = LocalPlayer.Idled:Connect(function()
+                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.W, false, game)
+                task.wait(0.05)
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.W, false, game)
+            end)
+        end)
+        Rayfield:Notify({ Title = "Anti AFK", Content = "Enabled!", Duration = 3 })
+    else
+        if antiAFKConnection then antiAFKConnection:Disconnect() antiAFKConnection = nil end
+        if idledConnection then idledConnection:Disconnect() idledConnection = nil end
+        Rayfield:Notify({ Title = "Anti AFK", Content = "Disabled.", Duration = 3 })
+    end
+end
+toggleCallbacks["AntiAFK"] = onAntiAFK
+MiscTab:CreateToggle({ Name = "Anti AFK", CurrentValue = startFlags.AntiAFK, Flag = "AntiAFK", Callback = onAntiAFK })
+if startFlags.AntiAFK then onAntiAFK(true) end
+
 MiscTab:CreateSection("Server")
 local TeleportService = game:GetService("TeleportService")
 MiscTab:CreateButton({ Name = "Rejoin", Callback = function()
@@ -742,7 +957,6 @@ MiscTab:CreateButton({ Name = "Server Hop", Callback = function()
     Rayfield:Notify({ Title = "Server Hop", Content = "Finding a new server...", Duration = 3 })
     task.spawn(function()
         local placeId = game.PlaceId local currentJobId = game.JobId
-        local HttpService = game:GetService("HttpService")
         local success, result = pcall(function()
             return HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=Asc&limit=100"))
         end)
@@ -759,51 +973,35 @@ MiscTab:CreateButton({ Name = "Server Hop", Callback = function()
 end })
 
 -- ── Config ────────────────────────────────────────────────────────────────────
-local HttpService = game:GetService("HttpService")
-local CONFIG_FILE = "TAT_Configs.json"
-
-local function fileExists(path)
-    local ok, r = pcall(function() return isfile(path) end) return ok and r
-end
-local function loadAllConfigs()
-    if not fileExists(CONFIG_FILE) then return {} end
-    local ok, data = pcall(function() return readfile(CONFIG_FILE) end)
-    if not ok or not data or data == "" then return {} end
-    local ok2, parsed = pcall(function() return HttpService:JSONDecode(data) end)
-    if ok2 and type(parsed) == "table" then return parsed end
-    return {}
-end
-local function saveAllConfigs(configs)
-    local ok, encoded = pcall(function() return HttpService:JSONEncode(configs) end)
-    if not ok then Rayfield:Notify({ Title = "Config", Content = "Encode failed!", Duration = 4 }) return false end
-    local ok2 = pcall(function() writefile(CONFIG_FILE, encoded) end)
-    if not ok2 then Rayfield:Notify({ Title = "Config", Content = "Write failed!", Duration = 5 }) return false end
-    local ok3, verify = pcall(function() return readfile(CONFIG_FILE) end)
-    if not ok3 or verify ~= encoded then Rayfield:Notify({ Title = "Config", Content = "Verify failed!", Duration = 5 }) return false end
-    return true
-end
 local function getCurrentFlags()
     return {
+        AutoLaunchCycle      = toggleStates.AutoLaunchCycle,
         AutoPerfectLaunch    = toggleStates.AutoPerfectLaunch,
         AutoBuyBurger        = toggleStates.AutoBuyBurger,
         AutoTrashFarm        = toggleStates.AutoTrashFarm,
         AutoTrashFarmBlatant = toggleStates.AutoTrashFarmBlatant,
         MeteorESP            = toggleStates.MeteorESP,
         PlayerESP            = toggleStates.PlayerESP,
+        AutoStateKeeper      = toggleStates.AutoStateKeeper,
+        AntiAFK              = toggleStates.AntiAFK,
     }
 end
+
 local function applyFlags(flags)
     for flag, value in pairs(flags) do
         local cb = toggleCallbacks[flag]
         if cb then
-            pcall(function() if Rayfield.Flags[flag] then Rayfield.Flags[flag]:Set(value) end end)
-            if value ~= toggleStates[flag] then cb(value) end
+            toggleStates[flag] = value
+            pcall(cb, value)
         end
     end
 end
+
 local function getConfigNames()
-    local configs = loadAllConfigs() local names = {}
+    local configs = loadAllConfigs()
+    local names = {}
     for name in pairs(configs) do table.insert(names, name) end
+    table.sort(names)
     if #names == 0 then table.insert(names, "No Configs Saved") end
     return names
 end
@@ -811,11 +1009,29 @@ end
 local ConfigTab = Window:CreateTab("Config", 4483362458)
 ConfigTab:CreateSection("Saved Configs")
 local selectedConfig = ""
+
+local configNames = getConfigNames()
 local configDropdown = ConfigTab:CreateDropdown({
-    Name = "Select Config", Options = getConfigNames(), CurrentOption = {"No Configs Saved"},
-    Flag = "SelectedConfig", MultipleOptions = false,
-    Callback = function(s) selectedConfig = type(s) == "table" and s[1] or s end,
+    Name = "Select Config",
+    Options = configNames,
+    CurrentOption = { configNames[1] },
+    Flag = "SelectedConfig",
+    MultipleOptions = false,
+    Callback = function(s)
+        selectedConfig = type(s) == "table" and s[1] or s
+    end,
 })
+selectedConfig = configNames[1] ~= "No Configs Saved" and configNames[1] or ""
+
+local function refreshDropdown()
+    local names = getConfigNames()
+    local current = selectedConfig ~= "" and selectedConfig or names[1]
+    local found = false
+    for _, n in ipairs(names) do if n == current then found = true break end end
+    if not found then current = names[1] selectedConfig = current ~= "No Configs Saved" and current or "" end
+    pcall(function() configDropdown:Refresh(names, { current }) end)
+end
+
 ConfigTab:CreateButton({ Name = "Load Selected Config", Callback = function()
     if selectedConfig == "" or selectedConfig == "No Configs Saved" then
         Rayfield:Notify({ Title = "Config", Content = "Select a config first!", Duration = 3 }) return
@@ -823,52 +1039,75 @@ ConfigTab:CreateButton({ Name = "Load Selected Config", Callback = function()
     local cfg = loadAllConfigs()[selectedConfig]
     if cfg and cfg.flags then
         applyFlags(cfg.flags)
-        local summary = "" for flag, val in pairs(cfg.flags) do if val then summary = summary .. flag .. " " end end
+        local summary = ""
+        for flag, val in pairs(cfg.flags) do if val then summary = summary .. flag .. " " end end
         Rayfield:Notify({ Title = "Config Loaded: " .. selectedConfig, Content = summary ~= "" and ("ON: " .. summary) or "All off", Duration = 5 })
-    else Rayfield:Notify({ Title = "Config", Content = "Not found!", Duration = 3 }) end
+    else
+        Rayfield:Notify({ Title = "Config", Content = "Config not found!", Duration = 3 })
+    end
 end })
+
 ConfigTab:CreateButton({ Name = "Delete Selected Config", Callback = function()
     if selectedConfig == "" or selectedConfig == "No Configs Saved" then
         Rayfield:Notify({ Title = "Config", Content = "Select a config to delete!", Duration = 3 }) return
     end
     local configs = loadAllConfigs()
     if configs[selectedConfig] then
-        configs[selectedConfig] = nil saveAllConfigs(configs)
-        Rayfield:Notify({ Title = "Config", Content = "Deleted: " .. selectedConfig, Duration = 3 })
-        selectedConfig = "" configDropdown:Refresh(getConfigNames(), {"No Configs Saved"})
-    else Rayfield:Notify({ Title = "Config", Content = "Not found!", Duration = 3 }) end
+        configs[selectedConfig] = nil
+        if saveAllConfigs(configs) then
+            Rayfield:Notify({ Title = "Config", Content = "Deleted: " .. selectedConfig, Duration = 3 })
+            selectedConfig = ""
+            refreshDropdown()
+        end
+    else
+        Rayfield:Notify({ Title = "Config", Content = "Not found!", Duration = 3 })
+    end
 end })
+
 ConfigTab:CreateSection("Create Config")
 local configNameInput = ""
-ConfigTab:CreateInput({ Name = "Config Name", PlaceholderText = "Enter config name...", RemoveTextAfterFocusLost = false,
-    Callback = function(text) configNameInput = text end })
+ConfigTab:CreateInput({
+    Name = "Config Name",
+    PlaceholderText = "Enter config name...",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(text) configNameInput = text end
+})
+
 local autoLoadOnSave = false
-ConfigTab:CreateToggle({ Name = "Auto Load on Execute", CurrentValue = false, Flag = "ConfigAutoLoad",
-    Callback = function(value) autoLoadOnSave = value end })
+ConfigTab:CreateToggle({
+    Name = "Auto Load on Execute",
+    CurrentValue = false,
+    Flag = "ConfigAutoLoad",
+    Callback = function(value) autoLoadOnSave = value end
+})
+
 ConfigTab:CreateButton({ Name = "Save Config", Callback = function()
     local name = configNameInput
-    if not name or name == "" then Rayfield:Notify({ Title = "Config", Content = "Enter a name first!", Duration = 3 }) return end
+    if not name or name == "" then
+        Rayfield:Notify({ Title = "Config", Content = "Enter a name first!", Duration = 3 }) return
+    end
     local configs = loadAllConfigs()
     if autoLoadOnSave then for _, v in pairs(configs) do v.autoLoad = false end end
     local flags = getCurrentFlags()
     configs[name] = { flags = flags, autoLoad = autoLoadOnSave }
     if saveAllConfigs(configs) then
-        local summary = "" for flag, val in pairs(flags) do if val then summary = summary .. flag .. " " end end
-        Rayfield:Notify({ Title = "Saved: " .. name, Content = (summary ~= "" and ("ON: " .. summary) or "All off") .. (autoLoadOnSave and " | Auto Load ON" or ""), Duration = 5 })
-        configDropdown:Refresh(getConfigNames(), {name}) selectedConfig = name
+        local summary = ""
+        for flag, val in pairs(flags) do if val then summary = summary .. flag .. " " end end
+        Rayfield:Notify({
+            Title = "Saved: " .. name,
+            Content = (summary ~= "" and ("ON: " .. summary) or "All off") .. (autoLoadOnSave and " | Auto Load ON" or ""),
+            Duration = 5
+        })
+        selectedConfig = name
+        refreshDropdown()
     end
 end })
 
 task.spawn(function()
-    task.wait(2)
-    local configs = loadAllConfigs() local names = getConfigNames()
-    configDropdown:Refresh(names, {names[1]})
-    selectedConfig = names[1] ~= "No Configs Saved" and names[1] or ""
-    for name, cfg in pairs(configs) do
-        if cfg.autoLoad and cfg.flags then
-            task.wait(0.5) applyFlags(cfg.flags)
-            Rayfield:Notify({ Title = "Config", Content = "Auto loaded: " .. name, Duration = 4 }) break
-        end
+    task.wait(3)
+    refreshDropdown()
+    if autoLoadConfigName then
+        Rayfield:Notify({ Title = "Config", Content = "Auto loaded: " .. autoLoadConfigName, Duration = 4 })
     end
 end)
 
