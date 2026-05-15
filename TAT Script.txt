@@ -589,8 +589,43 @@ local function onAutoLaunchCycle(value)
     end
 end
 toggleCallbacks["AutoLaunchCycle"] = onAutoLaunchCycle
-MainTab:CreateToggle({ Name = "Auto Launch Cycle", CurrentValue = startFlags.AutoLaunchCycle, Flag = "AutoLaunchCycle", Callback = onAutoLaunchCycle })
+MainTab:CreateToggle({ Name = "Auto Launch", CurrentValue = startFlags.AutoLaunchCycle, Flag = "AutoLaunchCycle", Callback = onAutoLaunchCycle })
 if startFlags.AutoLaunchCycle then onAutoLaunchCycle(true) end
+
+-- ── Auto Launch Mastery ───────────────────────────────────────────────────────
+local masteryRunning = false
+
+local function doMasteryLoop()
+    while masteryRunning do
+        local character = LocalPlayer.Character
+        local hrp = character and character:FindFirstChild("HumanoidRootPart")
+        if not hrp then task.wait(1) continue end
+        -- Press E to bring out bey
+        pressKey(Enum.KeyCode.E)
+        task.wait(0.5)
+        -- Press M1 to start skill check (Auto Perfect Launch handles the actual click timing)
+        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+        task.wait(0.05)
+        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+        -- Wait for bey to launch
+        task.wait(2)
+        -- Press E to recall
+        pressKey(Enum.KeyCode.E)
+        task.wait(0.5)
+    end
+end
+
+local function onAutoLaunchMastery(value)
+    masteryRunning = value
+    if value then
+        task.spawn(doMasteryLoop)
+        Rayfield:Notify({ Title = "Auto Launch Mastery", Content = "Started!", Duration = 3 })
+    else
+        Rayfield:Notify({ Title = "Auto Launch Mastery", Content = "Stopped.", Duration = 3 })
+    end
+end
+MainTab:CreateToggle({ Name = "Auto Launch Mastery", CurrentValue = false, Flag = "AutoLaunchMastery", Callback = onAutoLaunchMastery })
+
 
 local function onAutoPerfectLaunch(value)
     toggleStates.AutoPerfectLaunch = value
