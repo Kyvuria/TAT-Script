@@ -95,6 +95,51 @@ local isUnderground = false
 local autoLaunchRunning = false
 local isDoingLaunchCycle = false
 
+-- ── WalkSpeed persistence ─────────────────────────────────────────────────────
+local currentWSValue = 16
+local currentJPValue = 50
+local wsOverrideConnection = nil
+
+local function applyWalkSpeed(humanoid, value)
+    if humanoid then
+        humanoid.WalkSpeed = value
+    end
+end
+
+local function applyJumpPower(humanoid, value)
+    if humanoid then
+        humanoid.UseJumpPower = true
+        humanoid.JumpPower = value
+    end
+end
+
+local function startWSOverride()
+    if wsOverrideConnection then wsOverrideConnection:Disconnect() end
+    wsOverrideConnection = RunService.Heartbeat:Connect(function()
+        local char = LocalPlayer.Character
+        local h = char and char:FindFirstChild("Humanoid")
+        if not h then return end
+        -- Don't fight with sprint: only enforce WalkSpeed when LeftControl is NOT held.
+        -- When sprinting the game sets a higher speed; we let it do that naturally.
+        local sprinting = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
+        if not sprinting then
+            if h.WalkSpeed ~= currentWSValue then h.WalkSpeed = currentWSValue end
+        end
+        -- JumpPower doesn't conflict with sprint so always enforce it
+        if h.JumpPower ~= currentJPValue then h.UseJumpPower = true h.JumpPower = currentJPValue end
+    end)
+end
+
+startWSOverride()
+
+LocalPlayer.CharacterAdded:Connect(function(newChar)
+    local h = newChar:WaitForChild("Humanoid")
+    h.WalkSpeed = currentWSValue
+    h.UseJumpPower = true
+    h.JumpPower = currentJPValue
+end)
+
+-- ── Movement helpers ──────────────────────────────────────────────────────────
 local function startNoclip()
     if noclipConnection then noclipConnection:Disconnect() end
     noclipConnection = RunService.Stepped:Connect(function()
@@ -369,10 +414,16 @@ end
 -- ── Bey ───────────────────────────────────────────────────────────────────────
 local function getMyTop() return workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId)) end
 
+-- topNeedsPickup: top exists in workspace AND has no active target (it's been knocked out/stopped)
 local function topNeedsPickup()
     local top = getMyTop() if not top then return false end
     local target = top:FindFirstChild("Target")
     return target ~= nil and target.Value == nil
+end
+
+-- topIsInHand: top does NOT exist in workspace.Tops (player is holding it)
+local function topIsInHand()
+    return getMyTop() == nil
 end
 
 local function getTopPosition()
@@ -385,50 +436,116 @@ local function pressKey(key)
     VirtualInputManager:SendKeyEvent(false, key, false, game)
 end
 
+-- Returns true if the top is currently spinning in the arena (health > 0)
+local function isTopInArena()
+    local top = getMyTop()
+    if not top then return false end
+    local health = top:GetAttribute("Health")
+    return health ~= nil and health > 0
+end
+
+-- ── Revised doAutoLaunchCycle ─────────────────────────────────────────────────
+-- Flow:
+--   1. If top is in arena (spinning), wait for it to stop
+--   2. If top needs pickup (in workspace but Target.Value=nil), walk to it & press E
+--   3. Wait until top is in hand (gone from workspace.Tops)
+--   4. Teleport back to saved launch stand position
+--   5. Launch (press E + click)
+--   6. Save current position as the new stand for next cycle, repeat
+
+-- The stand position is saved ONCE when AutoLaunch is first enabled,
+-- then updated each cycle after returning (so it's always the launch pad position).
+local savedLaunchCFrame = nil
+
 local function doAutoLaunchCycle()
     if isDoingLaunchCycle then return end
     isDoingLaunchCycle = true
+
     local character = LocalPlayer.Character
     local hrp = character and character:FindFirstChild("HumanoidRootPart")
     local humanoid = character and character:FindFirstChild("Humanoid")
     if not hrp or not humanoid then isDoingLaunchCycle = false return end
-    local standCFrame = hrp.CFrame
-    pressKey(Enum.KeyCode.E) task.wait(0.5)
-    VirtualInputManager:SendMouseButtonEvent(0,0,0,true,game,1) task.wait(0.05)
-    VirtualInputManager:SendMouseButtonEvent(0,0,0,false,game,1)
-    task.wait(2)
-    local timeout = tick() + 120
-    repeat
-        task.wait(0.5)
+
+    -- Save launch position on first run (or if not saved yet)
+    if not savedLaunchCFrame then
+        savedLaunchCFrame = hrp.CFrame
+    end
+
+    -- ── Step 1: If top is already spinning, wait for it to stop ──
+    if isTopInArena() then
+        local battleTimeout = tick() + 180
+        repeat
+            task.wait(0.5)
+            if not autoLaunchRunning then isDoingLaunchCycle = false return end
+        until not isTopInArena() or tick() > battleTimeout
         if not autoLaunchRunning then isDoingLaunchCycle = false return end
-    until topNeedsPickup() or tick() > timeout
+        task.wait(1.5)
+    end
+
+    -- ── Step 2: If top needs pickup, walk to it and pick it up ──
+    if getMyTop() ~= nil then
+        local pickupTimeout = tick() + 30
+        repeat task.wait(0.3) until topNeedsPickup() or topIsInHand() or tick() > pickupTimeout
+
+        if topNeedsPickup() then
+            local topPos = getTopPosition()
+            if topPos then
+                stuckCount = 0 lastPos = nil
+                humanoid:MoveTo(topPos)
+                local wt = tick() + 25
+                repeat
+                    task.wait(0.3)
+                    if not autoLaunchRunning then isDoingLaunchCycle = false return end
+                    local np = getTopPosition()
+                    if np then topPos = np humanoid:MoveTo(topPos) end
+                    checkStuck(hrp, humanoid, topPos) maybeJump(humanoid)
+                until (hrp.Position - (getTopPosition() or topPos)).Magnitude < 5 or tick() > wt
+                task.wait(0.3)
+                pressKey(Enum.KeyCode.E)
+                task.wait(0.8)
+            end
+        end
+    end
+
+    -- ── Step 3: Wait until top is actually in hand ──
+    local handTimeout = tick() + 10
+    repeat task.wait(0.3) until topIsInHand() or tick() > handTimeout
+
+    if not topIsInHand() then
+        Rayfield:Notify({ Title="Auto Launch", Content="Pickup failed, retrying...", Duration=3 })
+        isDoingLaunchCycle = false
+        if autoLaunchRunning then task.wait(2) task.spawn(doAutoLaunchCycle) end
+        return
+    end
+
     if not autoLaunchRunning then isDoingLaunchCycle = false return end
-    if not topNeedsPickup() then isDoingLaunchCycle = false return end
-    local topPos = getTopPosition()
-    if not topPos then isDoingLaunchCycle = false return end
+
+    -- ── Step 4: Walk back to launch stand, then snap precisely ──
+    local standPos = savedLaunchCFrame.Position
     stuckCount = 0 lastPos = nil
-    humanoid:MoveTo(topPos)
-    local walkTimeout = tick() + 25
-    repeat
-        task.wait(0.3)
-        if not autoLaunchRunning then isDoingLaunchCycle = false return end
-        local newPos = getTopPosition()
-        if newPos then topPos = newPos humanoid:MoveTo(topPos) end
-        checkStuck(hrp, humanoid, topPos) maybeJump(humanoid)
-    until (hrp.Position - (getTopPosition() or topPos)).Magnitude < 5 or tick() > walkTimeout
-    task.wait(0.3)
-    pressKey(Enum.KeyCode.E) task.wait(0.5)
-    stuckCount = 0 lastPos = nil
-    humanoid:MoveTo(standCFrame.Position)
+    humanoid:MoveTo(standPos)
     local returnTimeout = tick() + 20
     repeat
         task.wait(0.3)
-        if not autoLaunchRunning then isDoingLaunchCycle = false return end
-        checkStuck(hrp, humanoid, standCFrame.Position) maybeJump(humanoid)
-    until (hrp.Position - standCFrame.Position).Magnitude < 3 or tick() > returnTimeout
-    hrp.CFrame = standCFrame
+        if not autoLaunchRunning then isDoingLaunchCFrame = false return end
+        checkStuck(hrp, humanoid, standPos) maybeJump(humanoid)
+    until (hrp.Position - standPos).Magnitude < 4 or tick() > returnTimeout
+
+    -- Snap exactly to saved launch CFrame so aim is consistent
+    hrp.CFrame = savedLaunchCFrame
+    task.wait(1.2)
+
+    if not autoLaunchRunning then isDoingLaunchCycle = false return end
+
+    -- ── Step 5: Launch ──
+    pressKey(Enum.KeyCode.E)
+    task.wait(1.5)
+    if not autoLaunchRunning then isDoingLaunchCycle = false return end
+    VirtualInputManager:SendMouseButtonEvent(0,0,0,true,game,1) task.wait(0.05)
+    VirtualInputManager:SendMouseButtonEvent(0,0,0,false,game,1)
+
     isDoingLaunchCycle = false
-    if autoLaunchRunning then task.wait(0.3) task.spawn(doAutoLaunchCycle) end
+    if autoLaunchRunning then task.wait(2) task.spawn(doAutoLaunchCycle) end
 end
 
 local function doClick()
@@ -503,8 +620,15 @@ end
 -- ── Toggles ───────────────────────────────────────────────────────────────────
 local function onAutoLaunchCycle(value)
     toggleStates.AutoLaunchCycle = value autoLaunchRunning = value
-    if value then task.spawn(doAutoLaunchCycle) Rayfield:Notify({ Title="Auto Launch", Content="Started!", Duration=3 })
-    else isDoingLaunchCycle = false Rayfield:Notify({ Title="Auto Launch", Content="Stopped.", Duration=3 }) end
+    if value then
+        -- Capture launch position fresh each time toggle is turned on
+        savedLaunchCFrame = nil
+        task.spawn(doAutoLaunchCycle)
+        Rayfield:Notify({ Title="Auto Launch", Content="Started! Stand at your launch spot.", Duration=3 })
+    else
+        isDoingLaunchCycle = false
+        Rayfield:Notify({ Title="Auto Launch", Content="Stopped.", Duration=3 })
+    end
 end
 toggleCallbacks["AutoLaunchCycle"] = onAutoLaunchCycle
 MainTab:CreateToggle({ Name="Auto Launch", CurrentValue=startFlags.AutoLaunchCycle, Flag="AutoLaunchCycle", Callback=onAutoLaunchCycle })
@@ -612,10 +736,7 @@ end
 toggleCallbacks["AutoBuyBurger"] = onAutoEatBurger
 MainTab:CreateToggle({ Name="Auto Eat Burger (AFK)", CurrentValue=startFlags.AutoBuyBurger, Flag="AutoBuyBurger", Callback=onAutoEatBurger })
 if startFlags.AutoBuyBurger then onAutoEatBurger(true) end
-MainTab:CreateButton({ Name="Get Burger", Callback=function()
-    if not isBurgerBuying then task.spawn(function() doBurgerRun(true) end)
-    else Rayfield:Notify({ Title="Burger Run", Content="Already on a burger run!", Duration=2 }) end
-end })
+-- NOTE: "Get Burger" manual button removed as requested
 
 MainTab:CreateSection("Auto Trash")
 
@@ -649,8 +770,6 @@ if startFlags.AutoTrashFarmBlatant then onAutoTrashBlatant(true) end
 
 -- ── ESP Tab ───────────────────────────────────────────────────────────────────
 local ESPTab = Window:CreateTab("ESP", 4483362458)
-
--- ── Single combined ESP section ───────────────────────────────────────────────
 ESPTab:CreateSection("ESP")
 
 -- ── Player ESP ────────────────────────────────────────────────────────────────
@@ -690,7 +809,7 @@ local function applyPlayerESP(player)
     bb.Adornee = hrp bb.Parent = hrp
     local label = Instance.new("TextLabel")
     label.BackgroundTransparency = 1 label.Size = UDim2.new(1,0,1,0)
-    label.Font = Enum.Font.GothamBold label.TextSize = 16
+    label.Font = Enum.Font.GothamBold label.TextSize = 11
     label.TextColor3 = Color3.fromRGB(255,80,80) label.TextStrokeTransparency = 0
     label.TextStrokeColor3 = Color3.fromRGB(0,0,0)
     label.Text = player.DisplayName.."\n(@"..player.Name..")" label.Parent = bb
@@ -729,14 +848,11 @@ local meteorESPEnabled = false
 local meteorAddedConnection = nil
 local meteorRemovedConnections = {}
 
--- ── Meteor Timer state ────────────────────────────────────────────────────────
--- NOTE: lastMeteorCycleStart is intentionally persistent (module-level).
--- Toggling Meteor ESP off and back on does NOT reset it.
 local METEOR_INTERVAL = 15 * 60
 local meteorTimerGui = nil
 local meteorTimerConnection = nil
 local meteorTimerAddedConn = nil
-local lastMeteorCycleStart = nil   -- persists across ESP toggles
+local lastMeteorCycleStart = nil
 local meteorSpawnedThisCycle = false
 local meteorCycleResultShown = false
 local meteorStatusText = ""
@@ -747,14 +863,12 @@ local function buildMeteorTimerGui()
     local sg = Instance.new("ScreenGui")
     sg.Name = "MeteorTimerGui" sg.ResetOnSpawn = false sg.DisplayOrder = 999 sg.Parent = playerGui
 
-    -- Draggable outer frame
     local frame = Instance.new("Frame")
     frame.BackgroundColor3 = Color3.fromRGB(10,10,20) frame.BackgroundTransparency = 0.3
     frame.BorderSizePixel = 0 frame.Size = UDim2.new(0,280,0,90)
     frame.Position = UDim2.new(0.5,-140,0,12) frame.Parent = sg
     local corner = Instance.new("UICorner") corner.CornerRadius = UDim.new(0,8) corner.Parent = frame
 
-    -- Drag handle (title bar area)
     local dragHandle = Instance.new("TextButton")
     dragHandle.Name = "DragHandle"
     dragHandle.BackgroundTransparency = 1
@@ -763,7 +877,6 @@ local function buildMeteorTimerGui()
     dragHandle.Text = ""
     dragHandle.Parent = frame
 
-    -- Drag logic
     local dragging = false
     local dragStart = nil
     local startPos = nil
@@ -826,9 +939,9 @@ local function formatTime(secs)
 end
 
 local function onMeteorSpawned()
-    -- A meteor appeared during the current cycle — flag it, show status.
-    -- Do NOT reset lastMeteorCycleStart here; the 15-min cycle keeps running.
+    lastMeteorCycleStart = tick()
     meteorSpawnedThisCycle = true
+    meteorCycleResultShown = false
     meteorStatusText = "Spawned!"
     if meteorTimerGui then
         meteorTimerGui.status.Text = "Spawned!"
@@ -837,7 +950,6 @@ local function onMeteorSpawned()
 end
 
 local function onMeteorCycleEnd(spawned)
-    -- Show the result for this cycle.
     if spawned then
         meteorStatusText = "Spawned!"
         if meteorTimerGui then
@@ -851,19 +963,12 @@ local function onMeteorCycleEnd(spawned)
             meteorTimerGui.status.TextColor3 = Color3.fromRGB(255,80,80)
         end
     end
-    -- Reset for the next cycle. meteorCycleResultShown is set to true here
-    -- and only flipped back to false AFTER lastMeteorCycleStart advances,
-    -- so the heartbeat won't re-fire onMeteorCycleEnd on the very next tick.
     lastMeteorCycleStart = tick()
     meteorSpawnedThisCycle = false
-    -- Leave meteorCycleResultShown = true until the heartbeat detects
-    -- remaining > 0 again (i.e. the new cycle has properly started).
 end
 
 local function startMeteorTimer()
     buildMeteorTimerGui()
-    -- Only initialise the cycle start if we have never tracked one yet.
-    -- This preserves the timer when toggling the ESP off then back on.
     if not lastMeteorCycleStart then
         lastMeteorCycleStart = tick()
         meteorSpawnedThisCycle = false
@@ -881,17 +986,12 @@ local function startMeteorTimer()
         if not lastMeteorCycleStart then return end
         local remaining = METEOR_INTERVAL - (tick() - lastMeteorCycleStart)
         if remaining <= 0 then
-            -- Cycle expired — fire result once then wait for the new cycle to start.
             if not meteorCycleResultShown then
                 meteorCycleResultShown = true
                 onMeteorCycleEnd(meteorSpawnedThisCycle)
-                -- onMeteorCycleEnd resets lastMeteorCycleStart so remaining
-                -- will be positive on the next heartbeat tick and
-                -- meteorCycleResultShown will be cleared below.
             end
             meteorTimerGui.countdown.Text = "00 : 00"
         else
-            -- New cycle has started — allow the end-of-cycle trigger to fire again.
             meteorCycleResultShown = false
             meteorTimerGui.countdown.Text = formatTime(remaining)
             local pct = remaining / METEOR_INTERVAL
@@ -899,7 +999,6 @@ local function startMeteorTimer()
             elseif pct > 0.2 then meteorTimerGui.countdown.TextColor3 = Color3.fromRGB(255,165,0)
             else meteorTimerGui.countdown.TextColor3 = Color3.fromRGB(255,60,60) end
         end
-        -- Keep status label in sync with meteorStatusText.
         if meteorTimerGui.status.Text ~= meteorStatusText then
             meteorTimerGui.status.Text = meteorStatusText
         end
@@ -910,15 +1009,25 @@ local function stopMeteorTimer()
     if meteorTimerConnection then meteorTimerConnection:Disconnect() meteorTimerConnection = nil end
     if meteorTimerAddedConn then meteorTimerAddedConn:Disconnect() meteorTimerAddedConn = nil end
     destroyMeteorTimerGui()
-    -- NOTE: lastMeteorCycleStart, meteorSpawnedThisCycle, meteorCycleResultShown
-    -- and meteorStatusText are intentionally NOT reset here so the timer
-    -- continues from where it left off when the ESP is turned back on.
 end
 
 -- ── Meteor ESP functions ──────────────────────────────────────────────────────
 local function createMeteorESP(meteor)
     local core = meteor:FindFirstChild("Core") if not core then return end
     if core:FindFirstChild("MeteorESP") then return end
+
+    local oldHL = meteor:FindFirstChild("MeteorESPHighlight")
+    if oldHL then oldHL:Destroy() end
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "MeteorESPHighlight"
+    highlight.FillColor = Color3.fromRGB(180,120,255)
+    highlight.OutlineColor = Color3.fromRGB(180,120,255)
+    highlight.FillTransparency = 0.3
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Adornee = meteor
+    highlight.Parent = meteor
+
     local bb = Instance.new("BillboardGui")
     bb.Name = "MeteorESP" bb.AlwaysOnTop = true
     bb.Size = UDim2.new(0,120,0,40) bb.StudsOffset = Vector3.new(0,4,0)
@@ -947,6 +1056,7 @@ end
 
 local function removeAllMeteorESP()
     for _, meteor in ipairs(workspace.Map.Meteors:GetChildren()) do
+        local hl = meteor:FindFirstChild("MeteorESPHighlight") if hl then hl:Destroy() end
         local core = meteor:FindFirstChild("Core")
         if core then local bb = core:FindFirstChild("MeteorESP") if bb then bb:Destroy() end end
     end
@@ -985,6 +1095,83 @@ toggleCallbacks["MeteorESP"] = onMeteorESP
 ESPTab:CreateToggle({ Name="Meteor ESP", CurrentValue=startFlags.MeteorESP, Flag="MeteorESP", Callback=onMeteorESP })
 if startFlags.MeteorESP then onMeteorESP(true) end
 
+-- ── Trash ESP ─────────────────────────────────────────────────────────────────
+local trashESPEnabled = false
+local trashESPBBCache = {}
+local trashESPPromptConnections = {}
+
+local function createTrashESP(part)
+    if trashESPBBCache[part] then return end
+    local prompt = part:FindFirstChild("Prompt")
+    if not prompt then return end
+
+    local oldHL = part:FindFirstChild("TrashESPHighlight")
+    if oldHL then oldHL:Destroy() end
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "TrashESPHighlight"
+    highlight.FillColor = Color3.fromRGB(180,180,180)
+    highlight.OutlineColor = Color3.fromRGB(180,180,180)
+    highlight.FillTransparency = 0.3
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Adornee = part
+    highlight.Parent = part
+    highlight.Enabled = prompt.Enabled
+
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "TrashESP" bb.AlwaysOnTop = true
+    bb.Size = UDim2.new(0,130,0,40) bb.StudsOffset = Vector3.new(0,3,0)
+    bb.Adornee = part bb.Parent = workspace
+    bb.Enabled = prompt.Enabled
+    trashESPBBCache[part] = { bb = bb, highlight = highlight }
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1 label.Size = UDim2.new(1,0,1,0)
+    label.Font = Enum.Font.GothamBold label.TextSize = 14
+    label.TextColor3 = Color3.fromRGB(180,180,180) label.TextStrokeTransparency = 0
+    label.TextStrokeColor3 = Color3.fromRGB(0,0,0) label.Text = "🗑️ Trash" label.Parent = bb
+    local heartbeatConn = RunService.Heartbeat:Connect(function()
+        if not trashESPEnabled or not part or not part.Parent then return end
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            label.Text = "🗑️ Trash\n"..math.floor((hrp.Position - part.Position).Magnitude).." studs"
+        end
+    end)
+    local promptConn = prompt:GetPropertyChangedSignal("Enabled"):Connect(function()
+        bb.Enabled = prompt.Enabled
+        highlight.Enabled = prompt.Enabled
+    end)
+    trashESPPromptConnections[part] = { heartbeat = heartbeatConn, prompt = promptConn }
+end
+
+local function clearTrashESP()
+    for part, conns in pairs(trashESPPromptConnections) do
+        pcall(function() conns.heartbeat:Disconnect() end)
+        pcall(function() conns.prompt:Disconnect() end)
+    end
+    trashESPPromptConnections = {}
+    for _, entry in pairs(trashESPBBCache) do
+        pcall(function() entry.bb:Destroy() end)
+        pcall(function() entry.highlight:Destroy() end)
+    end
+    trashESPBBCache = {}
+end
+
+local function startTrashESP()
+    for _, part in ipairs(workspace.Map.Environment.Trash:GetChildren()) do
+        createTrashESP(part)
+    end
+end
+
+local function stopTrashESP() clearTrashESP() end
+
+local function onTrashESP(value)
+    trashESPEnabled = value
+    if value then startTrashESP() Rayfield:Notify({ Title="Trash ESP", Content="Enabled!", Duration=3 })
+    else stopTrashESP() Rayfield:Notify({ Title="Trash ESP", Content="Disabled.", Duration=3 }) end
+end
+ESPTab:CreateToggle({ Name="Trash ESP", CurrentValue=false, Flag="TrashESP", Callback=onTrashESP })
+
 -- ── Gold Trash ESP ────────────────────────────────────────────────────────────
 local goldTrashESPEnabled = false
 local goldTrashBBCache = {}
@@ -996,12 +1183,26 @@ local function createGoldTrashESP(part)
     if goldTrashBBCache[part] then return end
     local prompt = part:FindFirstChild("Prompt")
     if not prompt then return end
+
+    local oldHL = part:FindFirstChild("GoldTrashESPHighlight")
+    if oldHL then oldHL:Destroy() end
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "GoldTrashESPHighlight"
+    highlight.FillColor = Color3.fromRGB(255,215,0)
+    highlight.OutlineColor = Color3.fromRGB(255,215,0)
+    highlight.FillTransparency = 0.3
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Adornee = part
+    highlight.Parent = part
+    highlight.Enabled = prompt.Enabled
+
     local bb = Instance.new("BillboardGui")
     bb.Name = "GoldTrashESP" bb.AlwaysOnTop = true
     bb.Size = UDim2.new(0,130,0,40) bb.StudsOffset = Vector3.new(0,3,0)
     bb.Adornee = part bb.Parent = workspace
     bb.Enabled = prompt.Enabled
-    goldTrashBBCache[part] = bb
+    goldTrashBBCache[part] = { bb = bb, highlight = highlight }
     local label = Instance.new("TextLabel")
     label.BackgroundTransparency = 1 label.Size = UDim2.new(1,0,1,0)
     label.Font = Enum.Font.GothamBold label.TextSize = 14
@@ -1017,6 +1218,7 @@ local function createGoldTrashESP(part)
     end)
     local promptConn = prompt:GetPropertyChangedSignal("Enabled"):Connect(function()
         bb.Enabled = prompt.Enabled
+        highlight.Enabled = prompt.Enabled
     end)
     goldTrashPromptConnections[part] = { heartbeat = heartbeatConn, prompt = promptConn }
 end
@@ -1027,7 +1229,10 @@ local function clearGoldTrashESP()
         pcall(function() conns.prompt:Disconnect() end)
     end
     goldTrashPromptConnections = {}
-    for _, bb in pairs(goldTrashBBCache) do pcall(function() bb:Destroy() end) end
+    for _, entry in pairs(goldTrashBBCache) do
+        pcall(function() entry.bb:Destroy() end)
+        pcall(function() entry.highlight:Destroy() end)
+    end
     goldTrashBBCache = {}
 end
 
@@ -1047,6 +1252,76 @@ end
 toggleCallbacks["GoldTrashESP"] = onGoldTrashESP
 ESPTab:CreateToggle({ Name="Gold Trash ESP", CurrentValue=startFlags.GoldTrashESP, Flag="GoldTrashESP", Callback=onGoldTrashESP })
 if startFlags.GoldTrashESP then onGoldTrashESP(true) end
+
+-- ── Dumpster ESP ──────────────────────────────────────────────────────────────
+local dumpsterESPEnabled = false
+local dumpsterESPCache = {}
+
+local function createDumpsterESP(part)
+    if dumpsterESPCache[part] then return end
+    local prompt = part:FindFirstChild("Prompt")
+    if not prompt then return end
+
+    local oldHL = part:FindFirstChild("DumpsterESPHighlight")
+    if oldHL then oldHL:Destroy() end
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "DumpsterESPHighlight"
+    highlight.FillColor = Color3.fromRGB(0,200,80)
+    highlight.OutlineColor = Color3.fromRGB(0,200,80)
+    highlight.FillTransparency = 0.3
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Adornee = part
+    highlight.Parent = part
+
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "DumpsterESP" bb.AlwaysOnTop = true
+    bb.Size = UDim2.new(0,150,0,40) bb.StudsOffset = Vector3.new(0,4,0)
+    bb.Adornee = part bb.Parent = workspace
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1 label.Size = UDim2.new(1,0,1,0)
+    label.Font = Enum.Font.GothamBold label.TextSize = 14
+    label.TextColor3 = Color3.fromRGB(0,220,80) label.TextStrokeTransparency = 0
+    label.TextStrokeColor3 = Color3.fromRGB(0,0,0) label.Text = "♻️ Dumpster" label.Parent = bb
+
+    local heartbeatConn = RunService.Heartbeat:Connect(function()
+        if not dumpsterESPEnabled or not part or not part.Parent then return end
+        local onCooldown = isDumpsterOnCooldown(part)
+        bb.Enabled = not onCooldown
+        highlight.Enabled = not onCooldown
+        if not onCooldown then
+            local char = LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                label.Text = "♻️ Dumpster\n"..math.floor((hrp.Position - part.Position).Magnitude).." studs"
+            end
+        end
+    end)
+
+    dumpsterESPCache[part] = { bb = bb, highlight = highlight, heartbeat = heartbeatConn }
+end
+
+local function clearDumpsterESP()
+    for _, entry in pairs(dumpsterESPCache) do
+        pcall(function() entry.heartbeat:Disconnect() end)
+        pcall(function() entry.bb:Destroy() end)
+        pcall(function() entry.highlight:Destroy() end)
+    end
+    dumpsterESPCache = {}
+end
+
+local function startDumpsterESP()
+    for _, part in ipairs(workspace.Map.Environment.Dumpsters:GetChildren()) do
+        if part:IsA("Part") then createDumpsterESP(part) end
+    end
+end
+
+local function onDumpsterESP(value)
+    dumpsterESPEnabled = value
+    if value then startDumpsterESP() Rayfield:Notify({ Title="Dumpster ESP", Content="Enabled!", Duration=3 })
+    else clearDumpsterESP() Rayfield:Notify({ Title="Dumpster ESP", Content="Disabled.", Duration=3 }) end
+end
+ESPTab:CreateToggle({ Name="Dumpster ESP", CurrentValue=false, Flag="DumpsterESP", Callback=onDumpsterESP })
 
 -- ── Top Inspector ──────────────────────────────────────────────────────────────
 ESPTab:CreateSection("Top Inspector")
@@ -1502,32 +1777,27 @@ local MiscTab = Window:CreateTab("Misc", 4483362458)
 
 MiscTab:CreateSection("Character")
 
+-- WalkSpeed: min=16 (normal walk speed), persisted via Heartbeat override
 MiscTab:CreateSlider({
-    Name = "Walk Speed", Range = {16, 45}, Increment = 1,
+    Name = "Walk Speed", Range = {16, 50}, Increment = 1,
     Suffix = " studs/s", CurrentValue = 16, Flag = "WalkSpeed",
     Callback = function(value)
+        currentWSValue = value
         local char = LocalPlayer.Character
         local humanoid = char and char:FindFirstChild("Humanoid")
         if humanoid then humanoid.WalkSpeed = value end
-        LocalPlayer.CharacterAdded:Connect(function(newChar)
-            local h = newChar:WaitForChild("Humanoid")
-            if Rayfield.Flags["WalkSpeed"] then h.WalkSpeed = Rayfield.Flags["WalkSpeed"].Value end
-        end)
     end,
 })
 
+-- JumpPower: raised max to 300 so 100 actually feels like a real jump boost
 MiscTab:CreateSlider({
-    Name = "Jump Power", Range = {50, 100}, Increment = 1,
+    Name = "Jump Power", Range = {50, 300}, Increment = 5,
     Suffix = " power", CurrentValue = 50, Flag = "JumpPower",
     Callback = function(value)
+        currentJPValue = value
         local char = LocalPlayer.Character
         local humanoid = char and char:FindFirstChild("Humanoid")
-        if humanoid then humanoid.JumpPower = value humanoid.UseJumpPower = true end
-        LocalPlayer.CharacterAdded:Connect(function(newChar)
-            local h = newChar:WaitForChild("Humanoid")
-            h.UseJumpPower = true
-            if Rayfield.Flags["JumpPower"] then h.JumpPower = Rayfield.Flags["JumpPower"].Value end
-        end)
+        if humanoid then humanoid.UseJumpPower = true humanoid.JumpPower = value end
     end,
 })
 
@@ -1538,6 +1808,7 @@ local idledConnection = nil
 local function onAntiAFK(value)
     toggleStates.AntiAFK = value
     if value then
+        -- Press F13 periodically to prevent AFK kick. Does NOT press W or move the character.
         antiAFKConnection = RunService.Heartbeat:Connect(function()
             if tick() % 60 < 0.05 then
                 VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.F13, false, game) task.wait(0.05)
@@ -1550,7 +1821,7 @@ local function onAntiAFK(value)
                 VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.F13, false, game)
             end)
         end)
-        Rayfield:Notify({ Title="Anti AFK", Content="Enabled!", Duration=3 })
+        Rayfield:Notify({ Title="Anti AFK", Content="Enabled! (F13 method, no movement)", Duration=3 })
     else
         if antiAFKConnection then antiAFKConnection:Disconnect() antiAFKConnection = nil end
         if idledConnection then idledConnection:Disconnect() idledConnection = nil end
@@ -1561,23 +1832,15 @@ toggleCallbacks["AntiAFK"] = onAntiAFK
 MiscTab:CreateToggle({ Name="Anti AFK", CurrentValue=startFlags.AntiAFK, Flag="AntiAFK", Callback=onAntiAFK })
 if startFlags.AntiAFK then onAntiAFK(true) end
 
-MiscTab:CreateSection("FreeCam")
-local freecamLoaded = false
 MiscTab:CreateToggle({
-    Name = "FreeCam", CurrentValue = false, Flag = "FreeCam",
+    Name = "Noclip", CurrentValue = false, Flag = "Noclip",
     Callback = function(value)
         if value then
-            if not freecamLoaded then
-                pcall(function()
-                    loadstring(game:HttpGet("https://raw.githubusercontent.com/boatbomber/FreeCam/main/src/FreeCam.client.lua"))()
-                end)
-                freecamLoaded = true
-            end
-            Rayfield:Notify({ Title="FreeCam", Content="Loaded! Press Shift+P in-game to toggle.", Duration=5 })
+            startNoclip()
+            Rayfield:Notify({ Title="Noclip", Content="Enabled!", Duration=2 })
         else
-            local cam = workspace.CurrentCamera
-            if cam then cam.CameraType = Enum.CameraType.Custom end
-            Rayfield:Notify({ Title="FreeCam", Content="Camera restored. Press Shift+P to fully exit FreeCam.", Duration=4 })
+            stopNoclip()
+            Rayfield:Notify({ Title="Noclip", Content="Disabled.", Duration=2 })
         end
     end,
 })
