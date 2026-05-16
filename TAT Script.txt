@@ -1,7 +1,7 @@
 -- ── Pre-load config BEFORE building UI so CurrentValue is correct from the start ──
 local HttpService = game:GetService("HttpService")
 local CONFIG_FILE = "TAT_Configs.json"
-
+ 
 local function loadAllConfigs()
     local ok, data = pcall(function() return readfile(CONFIG_FILE) end)
     if not ok or not data or data == "" then return {} end
@@ -9,14 +9,14 @@ local function loadAllConfigs()
     if ok2 and type(parsed) == "table" then return parsed end
     return {}
 end
-
+ 
 local function saveAllConfigs(configs)
     local ok, encoded = pcall(function() return HttpService:JSONEncode(configs) end)
     if not ok then return false end
     local ok2 = pcall(function() writefile(CONFIG_FILE, encoded) end)
     return ok2
 end
-
+ 
 local startFlags = {
     AutoLaunchCycle      = false,
     AutoPerfectLaunch    = false,
@@ -42,31 +42,31 @@ do
         end
     end
 end
-
+ 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 local Window = Rayfield:CreateWindow({
    Name = "Totally Accurate Tops", Icon = 0,
    LoadingTitle = "Loading...", LoadingSubtitle = "by Kam",
    Theme = "Default", DisableRayfieldPrompts = true, DisableBuildWarnings = true,
 })
-
+ 
 local MainTab = Window:CreateTab("Main", 4483362458)
 local MainSection = MainTab:CreateSection("Automations")
-
+ 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local TweenService = game:GetService("TweenService")
-
+ 
 local LocalPlayer = Players.LocalPlayer
 local playerGui = LocalPlayer:WaitForChild("PlayerGui")
 local lastClick = 0
 local COOLDOWN = 0.5
-
+ 
 local perfectConnection
 local autoEnergyConnection
-
+ 
 local toggleStates = {
     AutoLaunchCycle      = false, AutoPerfectLaunch    = false,
     AutoBuyBurger        = false, AutoTrashFarm        = false,
@@ -75,7 +75,7 @@ local toggleStates = {
     AutoStateKeeper      = false, AntiAFK              = false,
 }
 local toggleCallbacks = {}
-
+ 
 local isManualRun = false
 local manualCancelled = false
 local lastPos = nil
@@ -84,7 +84,7 @@ local trashFarmRunning = false
 local blatantFarmRunning = false
 local noclipConnection = nil
 local trashBlacklist = {}
-
+ 
 local SAFE_SPEED = 140
 local lastGroundTouch = 0
 local GROUND_TOUCH_INTERVAL = 6
@@ -94,7 +94,7 @@ local isTouchingGround = false
 local isUnderground = false
 local autoLaunchRunning = false
 local isDoingLaunchCycle = false
-
+ 
 local function startNoclip()
     if noclipConnection then noclipConnection:Disconnect() end
     noclipConnection = RunService.Stepped:Connect(function()
@@ -104,7 +104,7 @@ local function startNoclip()
         end
     end)
 end
-
+ 
 local function stopNoclip()
     if noclipConnection then noclipConnection:Disconnect() noclipConnection = nil end
     local char = LocalPlayer.Character
@@ -112,7 +112,7 @@ local function stopNoclip()
         if part:IsA("BasePart") then part.CanCollide = true end
     end end
 end
-
+ 
 local function startAutoSprint(farmCheck)
     task.spawn(function()
         while farmCheck() do
@@ -122,17 +122,17 @@ local function startAutoSprint(farmCheck)
         pcall(function() VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.LeftControl, false, game) end)
     end)
 end
-
+ 
 local function stopAutoSprint()
     pcall(function() VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.LeftControl, false, game) end)
 end
-
+ 
 local function randomWait(mn, mx) task.wait(mn + math.random() * (mx - mn)) end
-
+ 
 local function maybeJump(humanoid)
     if math.random(1,3) == 1 then humanoid.Jump = true task.wait(0.1) humanoid.Jump = false end
 end
-
+ 
 local function checkStuck(hrp, humanoid, target)
     local cur = hrp.Position
     if lastPos then
@@ -147,7 +147,7 @@ local function checkStuck(hrp, humanoid, target)
     end
     lastPos = cur
 end
-
+ 
 local function walkTo(hrp, humanoid, target, timeout, blacklistKey, farmCheck)
     stuckCount = 0 lastPos = nil
     humanoid:MoveTo(target)
@@ -164,7 +164,7 @@ local function walkTo(hrp, humanoid, target, timeout, blacklistKey, farmCheck)
     end
     return arrived
 end
-
+ 
 local function goUnderground(hrp)
     if isUnderground then return end
     local dest = Vector3.new(hrp.Position.X, UNDERGROUND_Y, hrp.Position.Z)
@@ -172,7 +172,7 @@ local function goUnderground(hrp)
     local tween = TweenService:Create(hrp, TweenInfo.new(dur, Enum.EasingStyle.Linear), {CFrame = CFrame.new(dest)})
     tween:Play() tween.Completed:Wait() isUnderground = true
 end
-
+ 
 local function surfaceUp(hrp)
     if not isUnderground then return end
     local dest = Vector3.new(hrp.Position.X, UNDERGROUND_Y + 8, hrp.Position.Z)
@@ -180,7 +180,7 @@ local function surfaceUp(hrp)
     local tween = TweenService:Create(hrp, TweenInfo.new(dur, Enum.EasingStyle.Linear), {CFrame = CFrame.new(dest)})
     tween:Play() tween.Completed:Wait() isUnderground = false
 end
-
+ 
 local function touchGround(hrp)
     if isTouchingGround then return end
     isTouchingGround = true
@@ -192,7 +192,7 @@ local function touchGround(hrp)
     upTween:Play() upTween.Completed:Wait()
     lastGroundTouch = tick() isTouchingGround = false
 end
-
+ 
 local function blatantTweenTo(hrp, targetPos, farmCheck)
     local function makeTween()
         local dest = Vector3.new(targetPos.X, UNDERGROUND_Y, targetPos.Z)
@@ -214,7 +214,7 @@ local function blatantTweenTo(hrp, targetPos, farmCheck)
         end
     end
 end
-
+ 
 local function blatantWalkTo(hrp, humanoid, target, timeout, blacklistKey, farmCheck)
     if not isUnderground then goUnderground(hrp) end
     blatantTweenTo(hrp, target, farmCheck)
@@ -222,7 +222,7 @@ local function blatantWalkTo(hrp, humanoid, target, timeout, blacklistKey, farmC
     if not arrived and blacklistKey then trashBlacklist[blacklistKey] = true end
     return arrived
 end
-
+ 
 local function getTrashCount(waitForValid)
     local function read()
         local ok, label = pcall(function() return playerGui.HUD["Main HUD"].Corner.Trash.Label end)
@@ -238,12 +238,12 @@ local function getTrashCount(waitForValid)
     end
     return read()
 end
-
+ 
 local function isDumpsterOnCooldown(part)
     local t = part:FindFirstChild("TimerGUI")
     return t and t.Enabled == true
 end
-
+ 
 local function getAvailableDumpster()
     local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return nil end
@@ -259,7 +259,7 @@ local function getAvailableDumpster()
     end
     return best
 end
-
+ 
 local function getNextAvailableDumpsterTime()
     local soonest = nil
     for _, part in ipairs(workspace.Map.Environment.Dumpsters:GetChildren()) do
@@ -279,7 +279,7 @@ local function getNextAvailableDumpsterTime()
     end
     return soonest or 0
 end
-
+ 
 local function runFarmLoop(farmCheck, blatant)
     local function getChar()
         local c = LocalPlayer.Character
@@ -365,26 +365,26 @@ local function runFarmLoop(farmCheck, blatant)
         isUnderground = false
     end
 end
-
+ 
 -- ── Bey ───────────────────────────────────────────────────────────────────────
 local function getMyTop() return workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId)) end
-
+ 
 local function topNeedsPickup()
     local top = getMyTop() if not top then return false end
     local target = top:FindFirstChild("Target")
     return target ~= nil and target.Value == nil
 end
-
+ 
 local function getTopPosition()
     local top = getMyTop() if not top then return nil end
     return top:GetPivot().Position
 end
-
+ 
 local function pressKey(key)
     VirtualInputManager:SendKeyEvent(true, key, false, game) task.wait(0.05)
     VirtualInputManager:SendKeyEvent(false, key, false, game)
 end
-
+ 
 local function doAutoLaunchCycle()
     if isDoingLaunchCycle then return end
     isDoingLaunchCycle = true
@@ -430,29 +430,29 @@ local function doAutoLaunchCycle()
     isDoingLaunchCycle = false
     if autoLaunchRunning then task.wait(0.3) task.spawn(doAutoLaunchCycle) end
 end
-
+ 
 local function doClick()
     pcall(function()
         VirtualInputManager:SendMouseButtonEvent(0,0,0,true,game,1) task.wait(0.02)
         VirtualInputManager:SendMouseButtonEvent(0,0,0,false,game,1)
     end)
 end
-
+ 
 local function getBar()
     local hud = playerGui:FindFirstChild("HUD") if not hud then return end
     local launch = hud:FindFirstChild("Launch") if not launch or not launch.Visible then return end
     local bar = launch:FindFirstChild("Bar") if not bar or not bar.Visible then return end
     return bar
 end
-
+ 
 local function isOutOfEnergy()
     local ok, label = pcall(function() return playerGui["Player Notifications"].Notifications.Message.Label end)
     if not ok or not label then return false end
     return label.Visible and string.find(label.Text, "out of energy") ~= nil
 end
-
+ 
 local isBurgerBuying = false
-
+ 
 local function doBurgerRun(manual)
     if isBurgerBuying then return end
     isBurgerBuying = true isManualRun = manual or false manualCancelled = false
@@ -499,7 +499,7 @@ local function doBurgerRun(manual)
     if keyConnection then keyConnection:Disconnect() end
     isBurgerBuying = false isManualRun = false manualCancelled = false
 end
-
+ 
 -- ── Toggles ───────────────────────────────────────────────────────────────────
 local function onAutoLaunchCycle(value)
     toggleStates.AutoLaunchCycle = value autoLaunchRunning = value
@@ -509,7 +509,7 @@ end
 toggleCallbacks["AutoLaunchCycle"] = onAutoLaunchCycle
 MainTab:CreateToggle({ Name="Auto Launch", CurrentValue=startFlags.AutoLaunchCycle, Flag="AutoLaunchCycle", Callback=onAutoLaunchCycle })
 if startFlags.AutoLaunchCycle then onAutoLaunchCycle(true) end
-
+ 
 local masteryRunning = false
 local function doMasteryLoop()
     while masteryRunning do
@@ -527,7 +527,7 @@ MainTab:CreateToggle({ Name="Auto Launch Mastery", CurrentValue=false, Flag="Aut
     if value then task.spawn(doMasteryLoop) Rayfield:Notify({ Title="Auto Launch Mastery", Content="Started!", Duration=3 })
     else Rayfield:Notify({ Title="Auto Launch Mastery", Content="Stopped.", Duration=3 }) end
 end })
-
+ 
 local function onAutoPerfectLaunch(value)
     toggleStates.AutoPerfectLaunch = value
     if perfectConnection then perfectConnection:Disconnect() perfectConnection = nil end
@@ -550,11 +550,11 @@ end
 toggleCallbacks["AutoPerfectLaunch"] = onAutoPerfectLaunch
 MainTab:CreateToggle({ Name="Auto Perfect Launch", CurrentValue=startFlags.AutoPerfectLaunch, Flag="AutoPerfectLaunch", Callback=onAutoPerfectLaunch })
 if startFlags.AutoPerfectLaunch then onAutoPerfectLaunch(true) end
-
+ 
 local preferredState = "Attacking"
 local stateKeeperConnection = nil
 local isFixingState = false
-
+ 
 local function onAutoStateKeeper(value)
     toggleStates.AutoStateKeeper = value
     if value then
@@ -586,7 +586,7 @@ end
 toggleCallbacks["AutoStateKeeper"] = onAutoStateKeeper
 MainTab:CreateToggle({ Name="Auto State Keeper", CurrentValue=startFlags.AutoStateKeeper, Flag="AutoStateKeeper", Callback=onAutoStateKeeper })
 if startFlags.AutoStateKeeper then onAutoStateKeeper(true) end
-
+ 
 MainTab:CreateDropdown({
     Name="Preferred State", Options={"Attacking","Guarding"}, CurrentOption={"Attacking"},
     Flag="PreferredState", MultipleOptions=false,
@@ -595,7 +595,7 @@ MainTab:CreateDropdown({
         if toggleStates.AutoStateKeeper then Rayfield:Notify({ Title="State Keeper", Content="Now keeping: "..preferredState, Duration=2 }) end
     end,
 })
-
+ 
 local lastBuy = 0
 local BUYCOOLDOWN = 8
 local function onAutoEatBurger(value)
@@ -616,9 +616,9 @@ MainTab:CreateButton({ Name="Get Burger", Callback=function()
     if not isBurgerBuying then task.spawn(function() doBurgerRun(true) end)
     else Rayfield:Notify({ Title="Burger Run", Content="Already on a burger run!", Duration=2 }) end
 end })
-
+ 
 MainTab:CreateSection("Auto Trash")
-
+ 
 local function onAutoTrashLegit(value)
     toggleStates.AutoTrashFarm = value trashFarmRunning = value
     if value then
@@ -629,7 +629,7 @@ end
 toggleCallbacks["AutoTrashFarm"] = onAutoTrashLegit
 MainTab:CreateToggle({ Name="Auto Trash Farm (Legit)", CurrentValue=startFlags.AutoTrashFarm, Flag="AutoTrashFarm", Callback=onAutoTrashLegit })
 if startFlags.AutoTrashFarm then onAutoTrashLegit(true) end
-
+ 
 local function onAutoTrashBlatant(value)
     toggleStates.AutoTrashFarmBlatant = value blatantFarmRunning = value
     if value then
@@ -646,15 +646,18 @@ end
 toggleCallbacks["AutoTrashFarmBlatant"] = onAutoTrashBlatant
 MainTab:CreateToggle({ Name="Auto Trash Farm (Blatant)", CurrentValue=startFlags.AutoTrashFarmBlatant, Flag="AutoTrashFarmBlatant", Callback=onAutoTrashBlatant })
 if startFlags.AutoTrashFarmBlatant then onAutoTrashBlatant(true) end
-
+ 
 -- ── ESP Tab ───────────────────────────────────────────────────────────────────
 local ESPTab = Window:CreateTab("ESP", 4483362458)
-ESPTab:CreateSection("Player ESP")
-
+ 
+-- ── Single combined ESP section ───────────────────────────────────────────────
+ESPTab:CreateSection("ESP")
+ 
+-- ── Player ESP ────────────────────────────────────────────────────────────────
 local playerESPEnabled = false
 local playerESPConnections = {}
 local playerESPHighlights = {}
-
+ 
 local function removePlayerESP(player)
     if playerESPHighlights[player] then playerESPHighlights[player]:Destroy() playerESPHighlights[player] = nil end
     if player.Character then
@@ -662,7 +665,7 @@ local function removePlayerESP(player)
         if hrp then local bb = hrp:FindFirstChild("PlayerESPBB") if bb then bb:Destroy() end end
     end
 end
-
+ 
 local function applyPlayerESP(player)
     if player == LocalPlayer then return end
     local char = player.Character if not char then return end
@@ -692,26 +695,26 @@ local function applyPlayerESP(player)
     label.TextStrokeColor3 = Color3.fromRGB(0,0,0)
     label.Text = player.DisplayName.."\n(@"..player.Name..")" label.Parent = bb
 end
-
+ 
 local function setupPlayerESP(player)
     if player == LocalPlayer then return end
     if playerESPConnections[player] then playerESPConnections[player]:Disconnect() playerESPConnections[player] = nil end
     if player.Character then task.spawn(function() applyPlayerESP(player) end) end
     playerESPConnections[player] = player.CharacterAdded:Connect(function() task.wait(0.5) applyPlayerESP(player) end)
 end
-
+ 
 local function startPlayerESP()
     for _, p in ipairs(Players:GetPlayers()) do setupPlayerESP(p) end
     playerESPConnections["PlayerAdded"] = Players.PlayerAdded:Connect(function(p) task.wait(0.5) setupPlayerESP(p) end)
 end
-
+ 
 local function stopPlayerESP()
     for _, conn in pairs(playerESPConnections) do conn:Disconnect() end
     playerESPConnections = {}
     for _, p in ipairs(Players:GetPlayers()) do removePlayerESP(p) end
     playerESPHighlights = {}
 end
-
+ 
 local function onPlayerESP(value)
     toggleStates.PlayerESP = value playerESPEnabled = value
     if value then startPlayerESP() Rayfield:Notify({ Title="Player ESP", Content="Enabled!", Duration=3 })
@@ -720,12 +723,199 @@ end
 toggleCallbacks["PlayerESP"] = onPlayerESP
 ESPTab:CreateToggle({ Name="Player ESP", CurrentValue=startFlags.PlayerESP, Flag="PlayerESP", Callback=onPlayerESP })
 if startFlags.PlayerESP then onPlayerESP(true) end
-
+ 
 -- ── Meteor ESP ────────────────────────────────────────────────────────────────
 local meteorESPEnabled = false
 local meteorAddedConnection = nil
 local meteorRemovedConnections = {}
-
+ 
+-- ── Meteor Timer state ────────────────────────────────────────────────────────
+-- NOTE: lastMeteorCycleStart is intentionally persistent (module-level).
+-- Toggling Meteor ESP off and back on does NOT reset it.
+local METEOR_INTERVAL = 15 * 60
+local meteorTimerGui = nil
+local meteorTimerConnection = nil
+local meteorTimerAddedConn = nil
+local lastMeteorCycleStart = nil   -- persists across ESP toggles
+local meteorSpawnedThisCycle = false
+local meteorCycleResultShown = false
+local meteorStatusText = ""
+ 
+local function buildMeteorTimerGui()
+    local old = playerGui:FindFirstChild("MeteorTimerGui")
+    if old then old:Destroy() end
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "MeteorTimerGui" sg.ResetOnSpawn = false sg.DisplayOrder = 999 sg.Parent = playerGui
+ 
+    -- Draggable outer frame
+    local frame = Instance.new("Frame")
+    frame.BackgroundColor3 = Color3.fromRGB(10,10,20) frame.BackgroundTransparency = 0.3
+    frame.BorderSizePixel = 0 frame.Size = UDim2.new(0,280,0,90)
+    frame.Position = UDim2.new(0.5,-140,0,12) frame.Parent = sg
+    local corner = Instance.new("UICorner") corner.CornerRadius = UDim.new(0,8) corner.Parent = frame
+ 
+    -- Drag handle (title bar area)
+    local dragHandle = Instance.new("TextButton")
+    dragHandle.Name = "DragHandle"
+    dragHandle.BackgroundTransparency = 1
+    dragHandle.Size = UDim2.new(1, 0, 0, 34)
+    dragHandle.Position = UDim2.new(0, 0, 0, 0)
+    dragHandle.Text = ""
+    dragHandle.Parent = frame
+ 
+    -- Drag logic
+    local dragging = false
+    local dragStart = nil
+    local startPos = nil
+    dragHandle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+        end
+    end)
+    dragHandle.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+ 
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.BackgroundTransparency = 1 titleLabel.Size = UDim2.new(1,0,0,28)
+    titleLabel.Position = UDim2.new(0,0,0,6) titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 15 titleLabel.TextColor3 = Color3.fromRGB(200,200,200)
+    titleLabel.TextStrokeTransparency = 0.5 titleLabel.TextStrokeColor3 = Color3.fromRGB(0,0,0)
+    titleLabel.Text = "☄  METEOR SPAWN" titleLabel.ZIndex = 2 titleLabel.Parent = frame
+    local countdownLabel = Instance.new("TextLabel")
+    countdownLabel.Name = "Countdown" countdownLabel.BackgroundTransparency = 1
+    countdownLabel.Size = UDim2.new(1,0,0,36) countdownLabel.Position = UDim2.new(0,0,0,30)
+    countdownLabel.Font = Enum.Font.GothamBold countdownLabel.TextSize = 28
+    countdownLabel.TextColor3 = Color3.fromRGB(180,120,255) countdownLabel.TextStrokeTransparency = 0
+    countdownLabel.TextStrokeColor3 = Color3.fromRGB(0,0,0) countdownLabel.Text = "-- : --" countdownLabel.Parent = frame
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Name = "Status" statusLabel.BackgroundTransparency = 1
+    statusLabel.Size = UDim2.new(1,0,0,20) statusLabel.Position = UDim2.new(0,0,0,66)
+    statusLabel.Font = Enum.Font.GothamBold statusLabel.TextSize = 13
+    statusLabel.TextColor3 = Color3.fromRGB(100,255,100) statusLabel.TextStrokeTransparency = 0.5
+    statusLabel.TextStrokeColor3 = Color3.fromRGB(0,0,0) statusLabel.Text = "" statusLabel.Parent = frame
+    meteorTimerGui = { sg=sg, countdown=countdownLabel, status=statusLabel }
+end
+ 
+local function destroyMeteorTimerGui()
+    if meteorTimerGui then pcall(function() meteorTimerGui.sg:Destroy() end) meteorTimerGui = nil end
+    local old = playerGui:FindFirstChild("MeteorTimerGui") if old then old:Destroy() end
+end
+ 
+local function formatTime(secs)
+    secs = math.max(0, math.floor(secs))
+    return string.format("%02d : %02d", math.floor(secs/60), secs%60)
+end
+ 
+local function onMeteorSpawned()
+    -- A meteor appeared during the current cycle — flag it, show status.
+    -- Do NOT reset lastMeteorCycleStart here; the 15-min cycle keeps running.
+    meteorSpawnedThisCycle = true
+    meteorStatusText = "Spawned!"
+    if meteorTimerGui then
+        meteorTimerGui.status.Text = "Spawned!"
+        meteorTimerGui.status.TextColor3 = Color3.fromRGB(100,255,100)
+    end
+end
+ 
+local function onMeteorCycleEnd(spawned)
+    -- Show the result for this cycle.
+    if spawned then
+        meteorStatusText = "Spawned!"
+        if meteorTimerGui then
+            meteorTimerGui.status.Text = "Spawned!"
+            meteorTimerGui.status.TextColor3 = Color3.fromRGB(100,255,100)
+        end
+    else
+        meteorStatusText = "Not Spawned"
+        if meteorTimerGui then
+            meteorTimerGui.status.Text = "Not Spawned"
+            meteorTimerGui.status.TextColor3 = Color3.fromRGB(255,80,80)
+        end
+    end
+    -- Reset for the next cycle. meteorCycleResultShown is set to true here
+    -- and only flipped back to false AFTER lastMeteorCycleStart advances,
+    -- so the heartbeat won't re-fire onMeteorCycleEnd on the very next tick.
+    lastMeteorCycleStart = tick()
+    meteorSpawnedThisCycle = false
+    -- Leave meteorCycleResultShown = true until the heartbeat detects
+    -- remaining > 0 again (i.e. the new cycle has properly started).
+end
+ 
+local function startMeteorTimer()
+    buildMeteorTimerGui()
+    -- Only initialise the cycle start if we have never tracked one yet.
+    -- This preserves the timer when toggling the ESP off then back on.
+    if not lastMeteorCycleStart then
+        lastMeteorCycleStart = tick()
+        meteorSpawnedThisCycle = false
+        meteorCycleResultShown = false
+        meteorStatusText = ""
+    end
+    local spawnDebounce = false
+    meteorTimerAddedConn = workspace.Map.Meteors.ChildAdded:Connect(function()
+        if spawnDebounce then return end
+        spawnDebounce = true task.delay(1, function() spawnDebounce = false end)
+        onMeteorSpawned()
+    end)
+    meteorTimerConnection = RunService.Heartbeat:Connect(function()
+        if not meteorTimerGui then return end
+        if not lastMeteorCycleStart then return end
+        local remaining = METEOR_INTERVAL - (tick() - lastMeteorCycleStart)
+        if remaining <= 0 then
+            -- Cycle expired — fire result once then wait for the new cycle to start.
+            if not meteorCycleResultShown then
+                meteorCycleResultShown = true
+                onMeteorCycleEnd(meteorSpawnedThisCycle)
+                -- onMeteorCycleEnd resets lastMeteorCycleStart so remaining
+                -- will be positive on the next heartbeat tick and
+                -- meteorCycleResultShown will be cleared below.
+            end
+            meteorTimerGui.countdown.Text = "00 : 00"
+        else
+            -- New cycle has started — allow the end-of-cycle trigger to fire again.
+            meteorCycleResultShown = false
+            meteorTimerGui.countdown.Text = formatTime(remaining)
+            local pct = remaining / METEOR_INTERVAL
+            if pct > 0.5 then meteorTimerGui.countdown.TextColor3 = Color3.fromRGB(180,120,255)
+            elseif pct > 0.2 then meteorTimerGui.countdown.TextColor3 = Color3.fromRGB(255,165,0)
+            else meteorTimerGui.countdown.TextColor3 = Color3.fromRGB(255,60,60) end
+        end
+        -- Keep status label in sync with meteorStatusText.
+        if meteorTimerGui.status.Text ~= meteorStatusText then
+            meteorTimerGui.status.Text = meteorStatusText
+        end
+    end)
+end
+ 
+local function stopMeteorTimer()
+    if meteorTimerConnection then meteorTimerConnection:Disconnect() meteorTimerConnection = nil end
+    if meteorTimerAddedConn then meteorTimerAddedConn:Disconnect() meteorTimerAddedConn = nil end
+    destroyMeteorTimerGui()
+    -- NOTE: lastMeteorCycleStart, meteorSpawnedThisCycle, meteorCycleResultShown
+    -- and meteorStatusText are intentionally NOT reset here so the timer
+    -- continues from where it left off when the ESP is turned back on.
+end
+ 
+-- ── Meteor ESP functions ──────────────────────────────────────────────────────
 local function createMeteorESP(meteor)
     local core = meteor:FindFirstChild("Core") if not core then return end
     if core:FindFirstChild("MeteorESP") then return end
@@ -754,7 +944,7 @@ local function createMeteorESP(meteor)
         end
     end)
 end
-
+ 
 local function removeAllMeteorESP()
     for _, meteor in ipairs(workspace.Map.Meteors:GetChildren()) do
         local core = meteor:FindFirstChild("Core")
@@ -763,7 +953,7 @@ local function removeAllMeteorESP()
     for _, conn in pairs(meteorRemovedConnections) do conn:Disconnect() end
     meteorRemovedConnections = {}
 end
-
+ 
 local function startMeteorESP()
     for _, meteor in ipairs(workspace.Map.Meteors:GetChildren()) do createMeteorESP(meteor) end
     meteorAddedConnection = workspace.Map.Meteors.ChildAdded:Connect(function(meteor)
@@ -773,28 +963,35 @@ local function startMeteorESP()
         if core then createMeteorESP(meteor) end
     end)
 end
-
+ 
 local function stopMeteorESP()
     if meteorAddedConnection then meteorAddedConnection:Disconnect() meteorAddedConnection = nil end
     removeAllMeteorESP()
 end
-
+ 
 local function onMeteorESP(value)
     toggleStates.MeteorESP = value meteorESPEnabled = value
-    if value then startMeteorESP() Rayfield:Notify({ Title="Meteor ESP", Content="Enabled!", Duration=3 })
-    else stopMeteorESP() Rayfield:Notify({ Title="Meteor ESP", Content="Disabled.", Duration=3 }) end
+    if value then
+        startMeteorESP()
+        startMeteorTimer()
+        Rayfield:Notify({ Title="Meteor ESP", Content="Enabled! Timer started.", Duration=3 })
+    else
+        stopMeteorESP()
+        stopMeteorTimer()
+        Rayfield:Notify({ Title="Meteor ESP", Content="Disabled.", Duration=3 })
+    end
 end
 toggleCallbacks["MeteorESP"] = onMeteorESP
 ESPTab:CreateToggle({ Name="Meteor ESP", CurrentValue=startFlags.MeteorESP, Flag="MeteorESP", Callback=onMeteorESP })
 if startFlags.MeteorESP then onMeteorESP(true) end
-
+ 
 -- ── Gold Trash ESP ────────────────────────────────────────────────────────────
 local goldTrashESPEnabled = false
 local goldTrashBBCache = {}
 local goldTrashPromptConnections = {}
-
+ 
 local function isGoldTrash(part) return part:FindFirstChild("Golden") ~= nil end
-
+ 
 local function createGoldTrashESP(part)
     if goldTrashBBCache[part] then return end
     local prompt = part:FindFirstChild("Prompt")
@@ -823,7 +1020,7 @@ local function createGoldTrashESP(part)
     end)
     goldTrashPromptConnections[part] = { heartbeat = heartbeatConn, prompt = promptConn }
 end
-
+ 
 local function clearGoldTrashESP()
     for part, conns in pairs(goldTrashPromptConnections) do
         pcall(function() conns.heartbeat:Disconnect() end)
@@ -833,15 +1030,15 @@ local function clearGoldTrashESP()
     for _, bb in pairs(goldTrashBBCache) do pcall(function() bb:Destroy() end) end
     goldTrashBBCache = {}
 end
-
+ 
 local function startGoldTrashESP()
     for _, part in ipairs(workspace.Map.Environment.Trash:GetChildren()) do
         if isGoldTrash(part) then createGoldTrashESP(part) end
     end
 end
-
+ 
 local function stopGoldTrashESP() clearGoldTrashESP() end
-
+ 
 local function onGoldTrashESP(value)
     toggleStates.GoldTrashESP = value goldTrashESPEnabled = value
     if value then startGoldTrashESP() Rayfield:Notify({ Title="Gold Trash ESP", Content="Enabled!", Duration=3 })
@@ -850,15 +1047,15 @@ end
 toggleCallbacks["GoldTrashESP"] = onGoldTrashESP
 ESPTab:CreateToggle({ Name="Gold Trash ESP", CurrentValue=startFlags.GoldTrashESP, Flag="GoldTrashESP", Callback=onGoldTrashESP })
 if startFlags.GoldTrashESP then onGoldTrashESP(true) end
-
+ 
 -- ── Top Inspector ──────────────────────────────────────────────────────────────
 ESPTab:CreateSection("Top Inspector")
-
+ 
 local topInspectorEnabled = false
 local topInspectorConnections = {}
 local topBBCache = {}
 local topBuildLock = {}
-
+ 
 local function getOwnerName(top)
     local ownerVal = top:FindFirstChild("Owner")
     if ownerVal and ownerVal.Value then return ownerVal.Value.Name end
@@ -870,7 +1067,7 @@ local function getOwnerName(top)
     end
     return top.Name
 end
-
+ 
 local function getPartName(top, partName)
     local part = top:FindFirstChild(partName)
     if not part then return "?" end
@@ -878,7 +1075,7 @@ local function getPartName(top, partName)
     if n and tostring(n) ~= "" then return tostring(n) end
     return "?"
 end
-
+ 
 local function getRPMBarColor(pct)
     if pct >= 1.0 then
         return Color3.fromRGB(180, 80, 255)
@@ -890,26 +1087,22 @@ local function getRPMBarColor(pct)
         return Color3.fromRGB(255, 50, 50)
     end
 end
-
-local RPM_MULT = 150  -- only used for VictoryCents MaxRPM fallback
-
+ 
+local RPM_MULT = 150
+ 
 local LIVE_STATES = { Attacking = true, Guarding = true, Idle = true }
-
--- getLiveRPM: uses Health*20 which is exactly what the game HUD reads.
--- Physics (AssemblyAngularVelocity) does NOT match the HUD — confirmed via testing.
--- Returns nil when not spinning so caller preserves last known value.
+ 
 local function getLiveRPM(top)
     local state = tostring(top:GetAttribute("State") or "")
     local isSpinning = LIVE_STATES[state]
     if not isSpinning then return nil end
-
     local health = top:GetAttribute("Health")
     if health and health > 0 then
         return math.floor(health * 20)
     end
     return 0
 end
-
+ 
 local function getLiveMaxRPM(top)
     local mh = top:GetAttribute("MaxHealth")
     if mh and mh > 0 then
@@ -918,28 +1111,28 @@ local function getLiveMaxRPM(top)
     local vc = tonumber(top:GetAttribute("VictoryCents")) or 60
     return math.max(vc * RPM_MULT, 1)
 end
-
+ 
 local function buildTopBillboard(top)
     if topBuildLock[top] then return end
     topBuildLock[top] = true
-
+ 
     if top:GetAttribute("TaggedNPC") then
         topBuildLock[top] = nil
         return
     end
-
+ 
     if topBBCache[top] then
         pcall(function() topBBCache[top].rpmConn:Disconnect() end)
         pcall(function() topBBCache[top].bb:Destroy() end)
         topBBCache[top] = nil
     end
-
+ 
     local attachPart = top:FindFirstChild("Body") or top:FindFirstChild("Crown") or top:FindFirstChildWhichIsA("BasePart")
     if not attachPart then
         topBuildLock[top] = nil
         return
     end
-
+ 
     local attrs = top:GetAttributes()
     local crownName = getPartName(top, "Crown")
     local bodyName  = getPartName(top, "Body")
@@ -952,7 +1145,7 @@ local function buildTopBillboard(top)
     local atk    = attrs["Attack"]          or 0
     local def    = attrs["Defense"]         or 0
     local sta    = attrs["Stamina"]         or 0
-
+ 
     local LINE_H      = 14
     local PAD         = 4
     local NUM_LINES   = 10
@@ -960,7 +1153,7 @@ local function buildTopBillboard(top)
     local RPM_BAR_H   = 12
     local RPM_GAP     = 3
     local totalH = PAD + (LINE_H * NUM_LINES) + RPM_GAP + RPM_LABEL_H + RPM_BAR_H + PAD
-
+ 
     local bb = Instance.new("BillboardGui")
     bb.Name = "TopInspectorBB"
     bb.AlwaysOnTop = true
@@ -969,7 +1162,7 @@ local function buildTopBillboard(top)
     bb.MaxDistance = 0
     bb.Adornee = attachPart
     bb.Parent = attachPart
-
+ 
     local bg = Instance.new("Frame")
     bg.BackgroundColor3 = Color3.fromRGB(10, 10, 20)
     bg.BackgroundTransparency = 0.3
@@ -979,9 +1172,9 @@ local function buildTopBillboard(top)
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, 4)
     corner.Parent = bg
-
+ 
     local yPos = PAD
-
+ 
     local function makeLine(text, color, rich)
         local lbl = Instance.new("TextLabel")
         lbl.BackgroundTransparency = 1
@@ -999,7 +1192,7 @@ local function buildTopBillboard(top)
         yPos += LINE_H
         return lbl
     end
-
+ 
     makeLine(getOwnerName(top),                Color3.fromRGB(255, 255, 255))
     makeLine("Spirit: " .. spirit,             Color3.fromRGB(150, 100, 255))
     makeLine("Crown: "  .. crownName,          Color3.fromRGB(255, 215, 0))
@@ -1015,10 +1208,10 @@ local function buildTopBillboard(top)
         '</font>  <font color="#FFCC00">STA:' .. sta .. '</font>',
         Color3.fromRGB(255, 255, 255), true
     )
-
+ 
     yPos += RPM_GAP
     local rpmLabelRow = yPos
-
+ 
     local rpmTitle = Instance.new("TextLabel")
     rpmTitle.BackgroundTransparency = 1
     rpmTitle.Size = UDim2.new(0.5, 0, 0, RPM_LABEL_H)
@@ -1031,7 +1224,7 @@ local function buildTopBillboard(top)
     rpmTitle.TextXAlignment = Enum.TextXAlignment.Left
     rpmTitle.Text = "RPM"
     rpmTitle.Parent = bb
-
+ 
     local rpmPct = Instance.new("TextLabel")
     rpmPct.Name = "RPMPct"
     rpmPct.BackgroundTransparency = 1
@@ -1045,9 +1238,9 @@ local function buildTopBillboard(top)
     rpmPct.TextXAlignment = Enum.TextXAlignment.Right
     rpmPct.Text = "..."
     rpmPct.Parent = bb
-
+ 
     local barY = rpmLabelRow + RPM_LABEL_H
-
+ 
     local barBG = Instance.new("Frame")
     barBG.Name = "RPMBarBG"
     barBG.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
@@ -1058,7 +1251,7 @@ local function buildTopBillboard(top)
     local bgCorner = Instance.new("UICorner")
     bgCorner.CornerRadius = UDim.new(0, 3)
     bgCorner.Parent = barBG
-
+ 
     local barFill = Instance.new("Frame")
     barFill.Name = "RPMBarFill"
     barFill.BackgroundColor3 = Color3.fromRGB(0, 200, 255)
@@ -1068,7 +1261,7 @@ local function buildTopBillboard(top)
     local fillCorner = Instance.new("UICorner")
     fillCorner.CornerRadius = UDim.new(0, 3)
     fillCorner.Parent = barFill
-
+ 
     local barText = Instance.new("TextLabel")
     barText.Name = "RPMBarText"
     barText.BackgroundTransparency = 1
@@ -1080,60 +1273,47 @@ local function buildTopBillboard(top)
     barText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
     barText.Text = "..."
     barText.Parent = barBG
-
+ 
     local lastUpdate = 0
     local UPDATE_INTERVAL = 0.1
-
-    -- lastKnownRPM: only updated when physics gives a non-zero reading AND state is spinning.
-    -- When state transitions away from spinning (Idle/Recalling/etc.), we freeze the display
-    -- at lastKnownRPM so it shows the value the top had before it stopped, not 0.
-    -- When state goes back to spinning, we immediately start reading live again.
     local lastKnownRPM = 0
-    local lastSpinState = false  -- tracks previous frame's spinning state
-    local zeroFrames = 0         -- consecutive frames reading 0 while "spinning"
-    local ZERO_FRAME_THRESHOLD = 8 -- ~0.8s of 0 before we trust it's actually dead
-
+    local zeroFrames = 0
+    local ZERO_FRAME_THRESHOLD = 8
+ 
     local rpmConn = RunService.Heartbeat:Connect(function(dt)
         lastUpdate += dt
         if lastUpdate < UPDATE_INTERVAL then return end
         lastUpdate = 0
         if not top or not top.Parent or not bb or not bb.Parent then return end
-
+ 
         local maxRPM = getLiveMaxRPM(top)
         local state = tostring(top:GetAttribute("State") or "")
         local isSpinning = LIVE_STATES[state] == true
-
+ 
         local currentRPM
         if isSpinning then
-            local liveRPM = getLiveRPM(top)  -- returns nil if not spinning (won't happen here), or number
+            local liveRPM = getLiveRPM(top)
             if liveRPM and liveRPM > 0 then
-                -- Good live reading: update lastKnownRPM and reset zero counter
                 lastKnownRPM = liveRPM
                 zeroFrames = 0
                 currentRPM = liveRPM
             else
-                -- Physics reading is 0 or nil while state says spinning.
-                -- Could be: just launched (physics not settled), or stamina ran out.
-                -- Wait ZERO_FRAME_THRESHOLD frames before trusting the 0.
                 zeroFrames += 1
                 if zeroFrames >= ZERO_FRAME_THRESHOLD then
-                    -- Sustained zero: top likely dead/stamina gone — show 0
                     currentRPM = 0
                 else
-                    -- Transient zero: hold last known while physics settles
                     currentRPM = lastKnownRPM
                 end
             end
         else
-            -- Not spinning (Idle, Recalling, etc.): freeze display at last known
             zeroFrames = 0
             currentRPM = lastKnownRPM
         end
-
+ 
         local rawPct  = maxRPM > 0 and (currentRPM / maxRPM) or 0
         local fillPct = math.clamp(rawPct, 0, 1)
         local color   = getRPMBarColor(rawPct)
-
+ 
         local pctInt = math.floor(rawPct * 100)
         local displayPct
         if rawPct >= 1.0 then
@@ -1141,37 +1321,33 @@ local function buildTopBillboard(top)
         else
             displayPct = pctInt .. "%"
         end
-
-        -- Grey bar when not spinning (frozen display) so it's visually obvious
+ 
         if not isSpinning then
             barFill.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
         else
             barFill.BackgroundColor3 = color
         end
-
+ 
         barFill.Size  = UDim2.new(fillPct, 0, 1, 0)
         barText.Text  = string.format("%d / %d", currentRPM, maxRPM)
         rpmPct.Text   = displayPct
         rpmPct.TextColor3 = isSpinning and color or Color3.fromRGB(150, 150, 150)
-
-        -- Keep billboard attached to best available part
+ 
         local freshPart = top:FindFirstChild("Body") or top:FindFirstChild("Crown") or top:FindFirstChildWhichIsA("BasePart")
         if freshPart and bb.Adornee ~= freshPart then
             bb.Adornee = freshPart
         end
     end)
-
+ 
     topBBCache[top] = { bb = bb, rpmConn = rpmConn }
     topBuildLock[top] = nil
-
-    -- Rebuild billboard if static attributes change (e.g. player swaps bey parts)
+ 
     local attrConn = top.AttributeChanged:Connect(function(attrName)
         local staticAttrs = {
             Spirit=true, Attack=true, Defense=true, Stamina=true,
             SignatureMove_1=true, SignatureMove_2=true, SignatureMove_3=true, MaxHealth=true
         }
         if staticAttrs[attrName] then
-            -- Debounce: slight delay so rapid attr changes batch into one rebuild
             task.delay(0.5, function()
                 if top and top.Parent and topInspectorEnabled then
                     buildTopBillboard(top)
@@ -1179,7 +1355,7 @@ local function buildTopBillboard(top)
             end)
         end
     end)
-
+ 
     top.AncestryChanged:Connect(function()
         if not top.Parent then
             pcall(function() rpmConn:Disconnect() end)
@@ -1192,7 +1368,7 @@ local function buildTopBillboard(top)
         end
     end)
 end
-
+ 
 local function clearAllTopBillboards()
     for _, entry in pairs(topBBCache) do
         pcall(function() entry.rpmConn:Disconnect() end)
@@ -1201,14 +1377,14 @@ local function clearAllTopBillboards()
     topBBCache = {}
     topBuildLock = {}
 end
-
+ 
 local function teardownTopInspectorListeners()
     for _, conn in pairs(topInspectorConnections) do
         pcall(function() conn:Disconnect() end)
     end
     topInspectorConnections = {}
 end
-
+ 
 local function setupTopInspectorListeners()
     teardownTopInspectorListeners()
     topInspectorConnections["Added"] = workspace.Tops.ChildAdded:Connect(function(top)
@@ -1227,7 +1403,7 @@ local function setupTopInspectorListeners()
         topBuildLock[top] = nil
     end)
 end
-
+ 
 local function refreshTopInspector()
     clearAllTopBillboards()
     if not topInspectorEnabled then return end
@@ -1238,7 +1414,7 @@ local function refreshTopInspector()
         end
     end
 end
-
+ 
 local function startTopInspector()
     setupTopInspectorListeners()
     for _, top in ipairs(workspace.Tops:GetChildren()) do
@@ -1247,12 +1423,12 @@ local function startTopInspector()
         end
     end
 end
-
+ 
 local function stopTopInspector()
     teardownTopInspectorListeners()
     clearAllTopBillboards()
 end
-
+ 
 local function onTopInspector(value)
     topInspectorEnabled = value
     if value then
@@ -1268,7 +1444,7 @@ ESPTab:CreateButton({ Name="Refresh Tops", Callback=function()
     refreshTopInspector()
     Rayfield:Notify({ Title="Top Inspector", Content="Refreshed!", Duration=2 })
 end })
-
+ 
 -- ── Debug Button ──────────────────────────────────────────────────────────────
 ESPTab:CreateSection("Debug")
 ESPTab:CreateButton({ Name="Print My Top Data", Callback=function()
@@ -1283,7 +1459,7 @@ ESPTab:CreateButton({ Name="Print My Top Data", Callback=function()
     local state  = top:GetAttribute("State")
     local mh     = top:GetAttribute("MaxHealth")
     local vc     = top:GetAttribute("VictoryCents")
-
+ 
     print("──── [TAT DEBUG] My Top ────")
     print("  State:                 ", tostring(state))
     print("  AngularVelocity attr:  ", tostring(avAttr))
@@ -1296,7 +1472,6 @@ ESPTab:CreateButton({ Name="Print My Top Data", Callback=function()
     if mh and mh > 0 then
         print("  → MaxRPM (MH*20):     ", math.floor(mh * 20))
     end
-    -- Dump all parts with non-zero angular velocity
     print("  → Scanning all parts for AssemblyAngularVelocity:")
     local bestY = 0
     for _, part in ipairs(top:GetDescendants()) do
@@ -1311,7 +1486,7 @@ ESPTab:CreateButton({ Name="Print My Top Data", Callback=function()
     local bestRPM = math.floor(bestY * RPM_MULT)
     print("  → Best physics RPM:   ", bestRPM)
     print("────────────────────────────")
-
+ 
     Rayfield:Notify({
         Title = "Debug Printed",
         Content = "State:"..tostring(state)..
@@ -1321,19 +1496,15 @@ ESPTab:CreateButton({ Name="Print My Top Data", Callback=function()
         Duration = 8
     })
 end })
-
+ 
 -- ── Misc Tab ──────────────────────────────────────────────────────────────────
 local MiscTab = Window:CreateTab("Misc", 4483362458)
-
+ 
 MiscTab:CreateSection("Character")
-
+ 
 MiscTab:CreateSlider({
-    Name = "Walk Speed",
-    Range = {16, 45},
-    Increment = 1,
-    Suffix = " studs/s",
-    CurrentValue = 16,
-    Flag = "WalkSpeed",
+    Name = "Walk Speed", Range = {16, 45}, Increment = 1,
+    Suffix = " studs/s", CurrentValue = 16, Flag = "WalkSpeed",
     Callback = function(value)
         local char = LocalPlayer.Character
         local humanoid = char and char:FindFirstChild("Humanoid")
@@ -1344,21 +1515,14 @@ MiscTab:CreateSlider({
         end)
     end,
 })
-
+ 
 MiscTab:CreateSlider({
-    Name = "Jump Power",
-    Range = {50, 100},
-    Increment = 1,
-    Suffix = " power",
-    CurrentValue = 50,
-    Flag = "JumpPower",
+    Name = "Jump Power", Range = {50, 100}, Increment = 1,
+    Suffix = " power", CurrentValue = 50, Flag = "JumpPower",
     Callback = function(value)
         local char = LocalPlayer.Character
         local humanoid = char and char:FindFirstChild("Humanoid")
-        if humanoid then
-            humanoid.JumpPower = value
-            humanoid.UseJumpPower = true
-        end
+        if humanoid then humanoid.JumpPower = value humanoid.UseJumpPower = true end
         LocalPlayer.CharacterAdded:Connect(function(newChar)
             local h = newChar:WaitForChild("Humanoid")
             h.UseJumpPower = true
@@ -1366,11 +1530,11 @@ MiscTab:CreateSlider({
         end)
     end,
 })
-
+ 
 MiscTab:CreateSection("Anti AFK")
 local antiAFKConnection = nil
 local idledConnection = nil
-
+ 
 local function onAntiAFK(value)
     toggleStates.AntiAFK = value
     if value then
@@ -1396,15 +1560,11 @@ end
 toggleCallbacks["AntiAFK"] = onAntiAFK
 MiscTab:CreateToggle({ Name="Anti AFK", CurrentValue=startFlags.AntiAFK, Flag="AntiAFK", Callback=onAntiAFK })
 if startFlags.AntiAFK then onAntiAFK(true) end
-
--- ── FreeCam ───────────────────────────────────────────────────────────────────
+ 
 MiscTab:CreateSection("FreeCam")
-
 local freecamLoaded = false
 MiscTab:CreateToggle({
-    Name = "FreeCam",
-    CurrentValue = false,
-    Flag = "FreeCam",
+    Name = "FreeCam", CurrentValue = false, Flag = "FreeCam",
     Callback = function(value)
         if value then
             if not freecamLoaded then
@@ -1421,8 +1581,7 @@ MiscTab:CreateToggle({
         end
     end,
 })
-
--- ── Server ────────────────────────────────────────────────────────────────────
+ 
 MiscTab:CreateSection("Server")
 local TeleportService = game:GetService("TeleportService")
 MiscTab:CreateButton({ Name="Rejoin", Callback=function()
@@ -1447,7 +1606,7 @@ MiscTab:CreateButton({ Name="Server Hop", Callback=function()
         task.wait(1) TeleportService:Teleport(game.PlaceId, LocalPlayer)
     end)
 end })
-
+ 
 -- ── Config ────────────────────────────────────────────────────────────────────
 local function getCurrentFlags()
     return {
@@ -1458,14 +1617,14 @@ local function getCurrentFlags()
         AutoStateKeeper=toggleStates.AutoStateKeeper, AntiAFK=toggleStates.AntiAFK,
     }
 end
-
+ 
 local function applyFlags(flags)
     for flag, value in pairs(flags) do
         local cb = toggleCallbacks[flag]
         if cb then toggleStates[flag] = value pcall(cb, value) end
     end
 end
-
+ 
 local function getConfigNames()
     local configs = loadAllConfigs()
     local names = {}
@@ -1474,7 +1633,7 @@ local function getConfigNames()
     if #names == 0 then table.insert(names, "No Configs Saved") end
     return names
 end
-
+ 
 local ConfigTab = Window:CreateTab("Config", 4483362458)
 ConfigTab:CreateSection("Saved Configs")
 local selectedConfig = ""
@@ -1485,7 +1644,7 @@ local configDropdown = ConfigTab:CreateDropdown({
     Callback=function(s) selectedConfig = type(s)=="table" and s[1] or s end,
 })
 selectedConfig = configNames[1] ~= "No Configs Saved" and configNames[1] or ""
-
+ 
 local function refreshDropdown()
     local names = getConfigNames()
     local current = selectedConfig ~= "" and selectedConfig or names[1]
@@ -1494,7 +1653,7 @@ local function refreshDropdown()
     if not found then current = names[1] selectedConfig = current ~= "No Configs Saved" and current or "" end
     pcall(function() configDropdown:Refresh(names, {current}) end)
 end
-
+ 
 ConfigTab:CreateButton({ Name="Load Selected Config", Callback=function()
     if selectedConfig == "" or selectedConfig == "No Configs Saved" then
         Rayfield:Notify({ Title="Config", Content="Select a config first!", Duration=3 }) return
@@ -1507,7 +1666,7 @@ ConfigTab:CreateButton({ Name="Load Selected Config", Callback=function()
         Rayfield:Notify({ Title="Config Loaded: "..selectedConfig, Content=summary~="" and "ON: "..summary or "All off", Duration=5 })
     else Rayfield:Notify({ Title="Config", Content="Config not found!", Duration=3 }) end
 end })
-
+ 
 ConfigTab:CreateButton({ Name="Delete Selected Config", Callback=function()
     if selectedConfig == "" or selectedConfig == "No Configs Saved" then
         Rayfield:Notify({ Title="Config", Content="Select a config to delete!", Duration=3 }) return
@@ -1521,14 +1680,14 @@ ConfigTab:CreateButton({ Name="Delete Selected Config", Callback=function()
         end
     else Rayfield:Notify({ Title="Config", Content="Not found!", Duration=3 }) end
 end })
-
+ 
 ConfigTab:CreateSection("Create Config")
 local configNameInput = ""
 ConfigTab:CreateInput({ Name="Config Name", PlaceholderText="Enter config name...", RemoveTextAfterFocusLost=false, Callback=function(text) configNameInput=text end })
-
+ 
 local autoLoadOnSave = false
 ConfigTab:CreateToggle({ Name="Auto Load on Execute", CurrentValue=false, Flag="ConfigAutoLoad", Callback=function(value) autoLoadOnSave=value end })
-
+ 
 ConfigTab:CreateButton({ Name="Save Config", Callback=function()
     local name = configNameInput
     if not name or name == "" then Rayfield:Notify({ Title="Config", Content="Enter a name first!", Duration=3 }) return end
@@ -1543,10 +1702,11 @@ ConfigTab:CreateButton({ Name="Save Config", Callback=function()
         selectedConfig = name refreshDropdown()
     end
 end })
-
+ 
 task.spawn(function()
     task.wait(3) refreshDropdown()
     if autoLoadConfigName then Rayfield:Notify({ Title="Config", Content="Auto loaded: "..autoLoadConfigName, Duration=4 }) end
 end)
-
+ 
 Rayfield:Notify({ Title="Loaded", Content="Totally Accurate Tops script loaded.", Duration=3 })
+ 
