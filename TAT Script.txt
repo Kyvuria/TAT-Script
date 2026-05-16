@@ -27,7 +27,7 @@ local startFlags = {
     PlayerESP            = false,
     GoldTrashESP         = false,
     AutoStateKeeper      = false,
-    AntiAFK              = true,  -- ON by default
+    AntiAFK              = true,
 }
 local autoLoadConfigName = nil
 do
@@ -721,7 +721,7 @@ toggleCallbacks["PlayerESP"] = onPlayerESP
 ESPTab:CreateToggle({ Name="Player ESP", CurrentValue=startFlags.PlayerESP, Flag="PlayerESP", Callback=onPlayerESP })
 if startFlags.PlayerESP then onPlayerESP(true) end
 
--- Meteor ESP (under Player ESP)
+-- ── Meteor ESP ────────────────────────────────────────────────────────────────
 local meteorESPEnabled = false
 local meteorAddedConnection = nil
 local meteorRemovedConnections = {}
@@ -788,65 +788,59 @@ toggleCallbacks["MeteorESP"] = onMeteorESP
 ESPTab:CreateToggle({ Name="Meteor ESP", CurrentValue=startFlags.MeteorESP, Flag="MeteorESP", Callback=onMeteorESP })
 if startFlags.MeteorESP then onMeteorESP(true) end
 
--- Gold Trash ESP (under Meteor ESP)
+-- ── Gold Trash ESP ────────────────────────────────────────────────────────────
 local goldTrashESPEnabled = false
 local goldTrashBBCache = {}
-local goldTrashAddedConnection = nil
-local goldTrashRemovedConnections = {}
+local goldTrashPromptConnections = {}
 
 local function isGoldTrash(part) return part:FindFirstChild("Golden") ~= nil end
 
 local function createGoldTrashESP(part)
     if goldTrashBBCache[part] then return end
-    if not isGoldTrash(part) then return end
     local prompt = part:FindFirstChild("Prompt")
+    if not prompt then return end
     local bb = Instance.new("BillboardGui")
     bb.Name = "GoldTrashESP" bb.AlwaysOnTop = true
     bb.Size = UDim2.new(0,130,0,40) bb.StudsOffset = Vector3.new(0,3,0)
-    bb.Adornee = part bb.Parent = part
+    bb.Adornee = part bb.Parent = workspace
+    bb.Enabled = prompt.Enabled
     goldTrashBBCache[part] = bb
     local label = Instance.new("TextLabel")
     label.BackgroundTransparency = 1 label.Size = UDim2.new(1,0,1,0)
     label.Font = Enum.Font.GothamBold label.TextSize = 14
     label.TextColor3 = Color3.fromRGB(255,215,0) label.TextStrokeTransparency = 0
     label.TextStrokeColor3 = Color3.fromRGB(0,0,0) label.Text = "💰 Gold Trash" label.Parent = bb
-    local conn = RunService.Heartbeat:Connect(function()
+    local heartbeatConn = RunService.Heartbeat:Connect(function()
         if not goldTrashESPEnabled or not part or not part.Parent then return end
         local char = LocalPlayer.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if hrp then label.Text = "💰 Gold Trash\n"..math.floor((hrp.Position-part.Position).Magnitude).." studs" end
-        bb.Enabled = not prompt or prompt.Enabled
-    end)
-    local key = tostring(part)
-    goldTrashRemovedConnections[key] = part.AncestryChanged:Connect(function()
-        if not part.Parent then
-            conn:Disconnect()
-            if goldTrashRemovedConnections[key] then goldTrashRemovedConnections[key]:Disconnect() goldTrashRemovedConnections[key] = nil end
-            goldTrashBBCache[part] = nil
+        if hrp then
+            label.Text = "💰 Gold Trash\n"..math.floor((hrp.Position - part.Position).Magnitude).." studs"
         end
     end)
+    local promptConn = prompt:GetPropertyChangedSignal("Enabled"):Connect(function()
+        bb.Enabled = prompt.Enabled
+    end)
+    goldTrashPromptConnections[part] = { heartbeat = heartbeatConn, prompt = promptConn }
 end
 
 local function clearGoldTrashESP()
+    for part, conns in pairs(goldTrashPromptConnections) do
+        pcall(function() conns.heartbeat:Disconnect() end)
+        pcall(function() conns.prompt:Disconnect() end)
+    end
+    goldTrashPromptConnections = {}
     for _, bb in pairs(goldTrashBBCache) do pcall(function() bb:Destroy() end) end
     goldTrashBBCache = {}
-    for _, conn in pairs(goldTrashRemovedConnections) do conn:Disconnect() end
-    goldTrashRemovedConnections = {}
 end
 
 local function startGoldTrashESP()
     for _, part in ipairs(workspace.Map.Environment.Trash:GetChildren()) do
         if isGoldTrash(part) then createGoldTrashESP(part) end
     end
-    goldTrashAddedConnection = workspace.Map.Environment.Trash.ChildAdded:Connect(function(part)
-        if goldTrashESPEnabled and isGoldTrash(part) then task.wait(0.2) createGoldTrashESP(part) end
-    end)
 end
 
-local function stopGoldTrashESP()
-    if goldTrashAddedConnection then goldTrashAddedConnection:Disconnect() goldTrashAddedConnection = nil end
-    clearGoldTrashESP()
-end
+local function stopGoldTrashESP() clearGoldTrashESP() end
 
 local function onGoldTrashESP(value)
     toggleStates.GoldTrashESP = value goldTrashESPEnabled = value
@@ -857,12 +851,13 @@ toggleCallbacks["GoldTrashESP"] = onGoldTrashESP
 ESPTab:CreateToggle({ Name="Gold Trash ESP", CurrentValue=startFlags.GoldTrashESP, Flag="GoldTrashESP", Callback=onGoldTrashESP })
 if startFlags.GoldTrashESP then onGoldTrashESP(true) end
 
--- ── Top Inspector (own section) ───────────────────────────────────────────────
+-- ── Top Inspector ──────────────────────────────────────────────────────────────
 ESPTab:CreateSection("Top Inspector")
 
 local topInspectorEnabled = false
 local topInspectorConnections = {}
 local topBBCache = {}
+local topBuildLock = {}
 
 local function getOwnerName(top)
     local ownerVal = top:FindFirstChild("Owner")
@@ -876,92 +871,455 @@ local function getOwnerName(top)
     return top.Name
 end
 
+local function getPartName(top, partName)
+    local part = top:FindFirstChild(partName)
+    if not part then return "?" end
+    local n = part:GetAttribute("Name")
+    if n and tostring(n) ~= "" then return tostring(n) end
+    return "?"
+end
+
+local function getRPMBarColor(pct)
+    if pct >= 1.0 then
+        return Color3.fromRGB(180, 80, 255)
+    elseif pct >= 0.50 then
+        return Color3.fromRGB(0, 200, 255)
+    elseif pct >= 0.25 then
+        return Color3.fromRGB(255, 165, 0)
+    else
+        return Color3.fromRGB(255, 50, 50)
+    end
+end
+
+local RPM_MULT = 150  -- only used for VictoryCents MaxRPM fallback
+
+local LIVE_STATES = { Attacking = true, Guarding = true, Idle = true }
+
+-- getLiveRPM: uses Health*20 which is exactly what the game HUD reads.
+-- Physics (AssemblyAngularVelocity) does NOT match the HUD — confirmed via testing.
+-- Returns nil when not spinning so caller preserves last known value.
+local function getLiveRPM(top)
+    local state = tostring(top:GetAttribute("State") or "")
+    local isSpinning = LIVE_STATES[state]
+    if not isSpinning then return nil end
+
+    local health = top:GetAttribute("Health")
+    if health and health > 0 then
+        return math.floor(health * 20)
+    end
+    return 0
+end
+
+local function getLiveMaxRPM(top)
+    local mh = top:GetAttribute("MaxHealth")
+    if mh and mh > 0 then
+        return math.max(math.floor(mh * 20), 1)
+    end
+    local vc = tonumber(top:GetAttribute("VictoryCents")) or 60
+    return math.max(vc * RPM_MULT, 1)
+end
+
 local function buildTopBillboard(top)
-    if topBBCache[top] then pcall(function() topBBCache[top]:Destroy() end) topBBCache[top] = nil end
+    if topBuildLock[top] then return end
+    topBuildLock[top] = true
+
+    if top:GetAttribute("TaggedNPC") then
+        topBuildLock[top] = nil
+        return
+    end
+
+    if topBBCache[top] then
+        pcall(function() topBBCache[top].rpmConn:Disconnect() end)
+        pcall(function() topBBCache[top].bb:Destroy() end)
+        topBBCache[top] = nil
+    end
+
     local attachPart = top:FindFirstChild("Body") or top:FindFirstChild("Crown") or top:FindFirstChildWhichIsA("BasePart")
-    if not attachPart then return end
+    if not attachPart then
+        topBuildLock[top] = nil
+        return
+    end
+
     local attrs = top:GetAttributes()
-    local crownName = attrs["Crown Name"]     or "?"
-    local bodyName  = attrs["Body Name"]      or "?"
-    local beltName  = attrs["Belt Name"]      or "?"
-    local pointName = attrs["Point Name"]     or "?"
-    local spirit    = attrs["Spirit"]         or "?"
-    local sig1      = attrs["SignatureMove_1"] or "?"
-    local sig2      = attrs["SignatureMove_2"] or "?"
-    local sig3      = attrs["SignatureMove_3"] or "?"
-    local atk       = attrs["Attack"]         or 0
-    local def       = attrs["Defense"]        or 0
-    local sta       = attrs["Stamina"]        or 0
-    local LINE_H = 13
+    local crownName = getPartName(top, "Crown")
+    local bodyName  = getPartName(top, "Body")
+    local beltName  = getPartName(top, "Belt")
+    local pointName = getPartName(top, "Point")
+    local spirit = attrs["Spirit"]          or "?"
+    local sig1   = attrs["SignatureMove_1"] or "?"
+    local sig2   = attrs["SignatureMove_2"] or "?"
+    local sig3   = attrs["SignatureMove_3"] or "?"
+    local atk    = attrs["Attack"]          or 0
+    local def    = attrs["Defense"]         or 0
+    local sta    = attrs["Stamina"]         or 0
+
+    local LINE_H      = 14
+    local PAD         = 4
+    local NUM_LINES   = 10
+    local RPM_LABEL_H = 13
+    local RPM_BAR_H   = 12
+    local RPM_GAP     = 3
+    local totalH = PAD + (LINE_H * NUM_LINES) + RPM_GAP + RPM_LABEL_H + RPM_BAR_H + PAD
+
     local bb = Instance.new("BillboardGui")
-    bb.Name = "TopInspectorBB" bb.AlwaysOnTop = true
-    bb.Size = UDim2.new(0,230,0,LINE_H*11+4) bb.StudsOffset = Vector3.new(0,5,0)
-    bb.MaxDistance = 0 bb.Adornee = attachPart bb.Parent = attachPart
-    topBBCache[top] = bb
+    bb.Name = "TopInspectorBB"
+    bb.AlwaysOnTop = true
+    bb.Size = UDim2.new(0, 235, 0, totalH)
+    bb.StudsOffset = Vector3.new(0, 5, 0)
+    bb.MaxDistance = 0
+    bb.Adornee = attachPart
+    bb.Parent = attachPart
+
     local bg = Instance.new("Frame")
-    bg.BackgroundColor3 = Color3.fromRGB(10,10,20) bg.BackgroundTransparency = 0.3
-    bg.BorderSizePixel = 0 bg.Size = UDim2.new(1,0,1,0) bg.Parent = bb
-    local corner = Instance.new("UICorner") corner.CornerRadius = UDim.new(0,4) corner.Parent = bg
-    local yPos = 2
+    bg.BackgroundColor3 = Color3.fromRGB(10, 10, 20)
+    bg.BackgroundTransparency = 0.3
+    bg.BorderSizePixel = 0
+    bg.Size = UDim2.new(1, 0, 1, 0)
+    bg.Parent = bb
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 4)
+    corner.Parent = bg
+
+    local yPos = PAD
+
     local function makeLine(text, color, rich)
         local lbl = Instance.new("TextLabel")
-        lbl.BackgroundTransparency = 1 lbl.Size = UDim2.new(1,-6,0,LINE_H)
-        lbl.Position = UDim2.new(0,3,0,yPos) lbl.Font = Enum.Font.GothamBold
-        lbl.TextSize = 11 lbl.TextColor3 = color lbl.TextStrokeTransparency = 0.5
-        lbl.TextStrokeColor3 = Color3.fromRGB(0,0,0) lbl.TextXAlignment = Enum.TextXAlignment.Left
-        lbl.RichText = rich or false lbl.Text = text lbl.Parent = bb
+        lbl.BackgroundTransparency = 1
+        lbl.Size = UDim2.new(1, -6, 0, LINE_H)
+        lbl.Position = UDim2.new(0, 3, 0, yPos)
+        lbl.Font = Enum.Font.GothamBold
+        lbl.TextSize = 11
+        lbl.TextColor3 = color
+        lbl.TextStrokeTransparency = 0.5
+        lbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+        lbl.RichText = rich or false
+        lbl.Text = text
+        lbl.Parent = bb
         yPos += LINE_H
+        return lbl
     end
-    makeLine(getOwnerName(top),                  Color3.fromRGB(255,255,255))
-    makeLine("Spirit: "..spirit,                 Color3.fromRGB(150,100,255))
-    makeLine("Crown: " ..crownName,              Color3.fromRGB(255,215,0))
-    makeLine("Body: "  ..bodyName,               Color3.fromRGB(160,220,160))
-    makeLine("Belt: "  ..beltName,               Color3.fromRGB(205,133,63))
-    makeLine("Point: " ..pointName,              Color3.fromRGB(220,220,220))
-    makeLine("Moves: " ..sig1,                   Color3.fromRGB(100,200,255))
-    makeLine("  "      ..sig2,                   Color3.fromRGB(100,200,255))
-    makeLine("  "      ..sig3,                   Color3.fromRGB(100,200,255))
-    makeLine('<font color="#FF4444">ATK:'..atk..'</font>  <font color="#44DD44">DEF:'..def..'</font>  <font color="#FFCC00">STA:'..sta..'</font>',
-        Color3.fromRGB(255,255,255), true)
+
+    makeLine(getOwnerName(top),                Color3.fromRGB(255, 255, 255))
+    makeLine("Spirit: " .. spirit,             Color3.fromRGB(150, 100, 255))
+    makeLine("Crown: "  .. crownName,          Color3.fromRGB(255, 215, 0))
+    makeLine("Body: "   .. bodyName,           Color3.fromRGB(160, 220, 160))
+    makeLine("Belt: "   .. beltName,           Color3.fromRGB(205, 133, 63))
+    makeLine("Point: "  .. pointName,          Color3.fromRGB(220, 220, 220))
+    makeLine("Moves: "  .. sig1,               Color3.fromRGB(100, 200, 255))
+    makeLine("  "       .. sig2,               Color3.fromRGB(100, 200, 255))
+    makeLine("  "       .. sig3,               Color3.fromRGB(100, 200, 255))
+    makeLine(
+        '<font color="#FF4444">ATK:' .. atk ..
+        '</font>  <font color="#44DD44">DEF:' .. def ..
+        '</font>  <font color="#FFCC00">STA:' .. sta .. '</font>',
+        Color3.fromRGB(255, 255, 255), true
+    )
+
+    yPos += RPM_GAP
+    local rpmLabelRow = yPos
+
+    local rpmTitle = Instance.new("TextLabel")
+    rpmTitle.BackgroundTransparency = 1
+    rpmTitle.Size = UDim2.new(0.5, 0, 0, RPM_LABEL_H)
+    rpmTitle.Position = UDim2.new(0, 3, 0, rpmLabelRow)
+    rpmTitle.Font = Enum.Font.GothamBold
+    rpmTitle.TextSize = 10
+    rpmTitle.TextColor3 = Color3.fromRGB(200, 200, 200)
+    rpmTitle.TextStrokeTransparency = 0.5
+    rpmTitle.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    rpmTitle.TextXAlignment = Enum.TextXAlignment.Left
+    rpmTitle.Text = "RPM"
+    rpmTitle.Parent = bb
+
+    local rpmPct = Instance.new("TextLabel")
+    rpmPct.Name = "RPMPct"
+    rpmPct.BackgroundTransparency = 1
+    rpmPct.Size = UDim2.new(0.5, -3, 0, RPM_LABEL_H)
+    rpmPct.Position = UDim2.new(0.5, 0, 0, rpmLabelRow)
+    rpmPct.Font = Enum.Font.GothamBold
+    rpmPct.TextSize = 10
+    rpmPct.TextColor3 = Color3.fromRGB(200, 200, 200)
+    rpmPct.TextStrokeTransparency = 0.5
+    rpmPct.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    rpmPct.TextXAlignment = Enum.TextXAlignment.Right
+    rpmPct.Text = "..."
+    rpmPct.Parent = bb
+
+    local barY = rpmLabelRow + RPM_LABEL_H
+
+    local barBG = Instance.new("Frame")
+    barBG.Name = "RPMBarBG"
+    barBG.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+    barBG.BorderSizePixel = 0
+    barBG.Size = UDim2.new(1, -6, 0, RPM_BAR_H)
+    barBG.Position = UDim2.new(0, 3, 0, barY)
+    barBG.Parent = bb
+    local bgCorner = Instance.new("UICorner")
+    bgCorner.CornerRadius = UDim.new(0, 3)
+    bgCorner.Parent = barBG
+
+    local barFill = Instance.new("Frame")
+    barFill.Name = "RPMBarFill"
+    barFill.BackgroundColor3 = Color3.fromRGB(0, 200, 255)
+    barFill.BorderSizePixel = 0
+    barFill.Size = UDim2.new(0, 0, 1, 0)
+    barFill.Parent = barBG
+    local fillCorner = Instance.new("UICorner")
+    fillCorner.CornerRadius = UDim.new(0, 3)
+    fillCorner.Parent = barFill
+
+    local barText = Instance.new("TextLabel")
+    barText.Name = "RPMBarText"
+    barText.BackgroundTransparency = 1
+    barText.Size = UDim2.new(1, 0, 1, 0)
+    barText.Font = Enum.Font.GothamBold
+    barText.TextSize = 9
+    barText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    barText.TextStrokeTransparency = 0.3
+    barText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    barText.Text = "..."
+    barText.Parent = barBG
+
+    local lastUpdate = 0
+    local UPDATE_INTERVAL = 0.1
+
+    -- lastKnownRPM: only updated when physics gives a non-zero reading AND state is spinning.
+    -- When state transitions away from spinning (Idle/Recalling/etc.), we freeze the display
+    -- at lastKnownRPM so it shows the value the top had before it stopped, not 0.
+    -- When state goes back to spinning, we immediately start reading live again.
+    local lastKnownRPM = 0
+    local lastSpinState = false  -- tracks previous frame's spinning state
+    local zeroFrames = 0         -- consecutive frames reading 0 while "spinning"
+    local ZERO_FRAME_THRESHOLD = 8 -- ~0.8s of 0 before we trust it's actually dead
+
+    local rpmConn = RunService.Heartbeat:Connect(function(dt)
+        lastUpdate += dt
+        if lastUpdate < UPDATE_INTERVAL then return end
+        lastUpdate = 0
+        if not top or not top.Parent or not bb or not bb.Parent then return end
+
+        local maxRPM = getLiveMaxRPM(top)
+        local state = tostring(top:GetAttribute("State") or "")
+        local isSpinning = LIVE_STATES[state] == true
+
+        local currentRPM
+        if isSpinning then
+            local liveRPM = getLiveRPM(top)  -- returns nil if not spinning (won't happen here), or number
+            if liveRPM and liveRPM > 0 then
+                -- Good live reading: update lastKnownRPM and reset zero counter
+                lastKnownRPM = liveRPM
+                zeroFrames = 0
+                currentRPM = liveRPM
+            else
+                -- Physics reading is 0 or nil while state says spinning.
+                -- Could be: just launched (physics not settled), or stamina ran out.
+                -- Wait ZERO_FRAME_THRESHOLD frames before trusting the 0.
+                zeroFrames += 1
+                if zeroFrames >= ZERO_FRAME_THRESHOLD then
+                    -- Sustained zero: top likely dead/stamina gone — show 0
+                    currentRPM = 0
+                else
+                    -- Transient zero: hold last known while physics settles
+                    currentRPM = lastKnownRPM
+                end
+            end
+        else
+            -- Not spinning (Idle, Recalling, etc.): freeze display at last known
+            zeroFrames = 0
+            currentRPM = lastKnownRPM
+        end
+
+        local rawPct  = maxRPM > 0 and (currentRPM / maxRPM) or 0
+        local fillPct = math.clamp(rawPct, 0, 1)
+        local color   = getRPMBarColor(rawPct)
+
+        local pctInt = math.floor(rawPct * 100)
+        local displayPct
+        if rawPct >= 1.0 then
+            displayPct = "+" .. math.min(pctInt, 999) .. "%"
+        else
+            displayPct = pctInt .. "%"
+        end
+
+        -- Grey bar when not spinning (frozen display) so it's visually obvious
+        if not isSpinning then
+            barFill.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+        else
+            barFill.BackgroundColor3 = color
+        end
+
+        barFill.Size  = UDim2.new(fillPct, 0, 1, 0)
+        barText.Text  = string.format("%d / %d", currentRPM, maxRPM)
+        rpmPct.Text   = displayPct
+        rpmPct.TextColor3 = isSpinning and color or Color3.fromRGB(150, 150, 150)
+
+        -- Keep billboard attached to best available part
+        local freshPart = top:FindFirstChild("Body") or top:FindFirstChild("Crown") or top:FindFirstChildWhichIsA("BasePart")
+        if freshPart and bb.Adornee ~= freshPart then
+            bb.Adornee = freshPart
+        end
+    end)
+
+    topBBCache[top] = { bb = bb, rpmConn = rpmConn }
+    topBuildLock[top] = nil
+
+    -- Rebuild billboard if static attributes change (e.g. player swaps bey parts)
+    local attrConn = top.AttributeChanged:Connect(function(attrName)
+        local staticAttrs = {
+            Spirit=true, Attack=true, Defense=true, Stamina=true,
+            SignatureMove_1=true, SignatureMove_2=true, SignatureMove_3=true, MaxHealth=true
+        }
+        if staticAttrs[attrName] then
+            -- Debounce: slight delay so rapid attr changes batch into one rebuild
+            task.delay(0.5, function()
+                if top and top.Parent and topInspectorEnabled then
+                    buildTopBillboard(top)
+                end
+            end)
+        end
+    end)
+
     top.AncestryChanged:Connect(function()
         if not top.Parent then
-            if topBBCache[top] then pcall(function() topBBCache[top]:Destroy() end) topBBCache[top] = nil end
+            pcall(function() rpmConn:Disconnect() end)
+            pcall(function() attrConn:Disconnect() end)
+            if topBBCache[top] then
+                pcall(function() topBBCache[top].bb:Destroy() end)
+                topBBCache[top] = nil
+            end
+            topBuildLock[top] = nil
         end
     end)
 end
 
 local function clearAllTopBillboards()
-    for _, bb in pairs(topBBCache) do pcall(function() bb:Destroy() end) end
+    for _, entry in pairs(topBBCache) do
+        pcall(function() entry.rpmConn:Disconnect() end)
+        pcall(function() entry.bb:Destroy() end)
+    end
     topBBCache = {}
+    topBuildLock = {}
+end
+
+local function teardownTopInspectorListeners()
+    for _, conn in pairs(topInspectorConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    topInspectorConnections = {}
+end
+
+local function setupTopInspectorListeners()
+    teardownTopInspectorListeners()
+    topInspectorConnections["Added"] = workspace.Tops.ChildAdded:Connect(function(top)
+        if not topInspectorEnabled then return end
+        task.wait(0.5)
+        if not topInspectorEnabled then return end
+        if top:GetAttribute("TaggedNPC") then return end
+        buildTopBillboard(top)
+    end)
+    topInspectorConnections["Removed"] = workspace.Tops.ChildRemoved:Connect(function(top)
+        if topBBCache[top] then
+            pcall(function() topBBCache[top].rpmConn:Disconnect() end)
+            pcall(function() topBBCache[top].bb:Destroy() end)
+            topBBCache[top] = nil
+        end
+        topBuildLock[top] = nil
+    end)
 end
 
 local function refreshTopInspector()
     clearAllTopBillboards()
     if not topInspectorEnabled then return end
-    for _, top in ipairs(workspace.Tops:GetChildren()) do task.spawn(buildTopBillboard, top) end
+    setupTopInspectorListeners()
+    for _, top in ipairs(workspace.Tops:GetChildren()) do
+        if not top:GetAttribute("TaggedNPC") then
+            task.spawn(buildTopBillboard, top)
+        end
+    end
 end
 
 local function startTopInspector()
-    refreshTopInspector()
-    topInspectorConnections["Added"] = workspace.Tops.ChildAdded:Connect(function(top)
-        if not topInspectorEnabled then return end
-        task.wait(0.3) task.spawn(buildTopBillboard, top)
-    end)
+    setupTopInspectorListeners()
+    for _, top in ipairs(workspace.Tops:GetChildren()) do
+        if not top:GetAttribute("TaggedNPC") then
+            task.spawn(buildTopBillboard, top)
+        end
+    end
 end
 
 local function stopTopInspector()
-    for _, conn in pairs(topInspectorConnections) do conn:Disconnect() end
-    topInspectorConnections = {} clearAllTopBillboards()
+    teardownTopInspectorListeners()
+    clearAllTopBillboards()
 end
 
 local function onTopInspector(value)
     topInspectorEnabled = value
-    if value then startTopInspector() Rayfield:Notify({ Title="Top Inspector", Content="Enabled!", Duration=3 })
-    else stopTopInspector() Rayfield:Notify({ Title="Top Inspector", Content="Disabled.", Duration=3 }) end
+    if value then
+        startTopInspector()
+        Rayfield:Notify({ Title="Top Inspector", Content="Enabled!", Duration=3 })
+    else
+        stopTopInspector()
+        Rayfield:Notify({ Title="Top Inspector", Content="Disabled.", Duration=3 })
+    end
 end
 ESPTab:CreateToggle({ Name="Top Inspector", CurrentValue=false, Flag="TopInspector", Callback=onTopInspector })
 ESPTab:CreateButton({ Name="Refresh Tops", Callback=function()
-    refreshTopInspector() Rayfield:Notify({ Title="Top Inspector", Content="Refreshed!", Duration=2 })
+    refreshTopInspector()
+    Rayfield:Notify({ Title="Top Inspector", Content="Refreshed!", Duration=2 })
+end })
+
+-- ── Debug Button ──────────────────────────────────────────────────────────────
+ESPTab:CreateSection("Debug")
+ESPTab:CreateButton({ Name="Print My Top Data", Callback=function()
+    local top = workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
+    if not top then
+        Rayfield:Notify({ Title="Debug", Content="No top found in workspace.Tops!", Duration=4 })
+        print("[TAT DEBUG] No top found for UserId:", LocalPlayer.UserId)
+        return
+    end
+    local primary = top.PrimaryPart
+    local avAttr = top:GetAttribute("AngularVelocity")
+    local state  = top:GetAttribute("State")
+    local mh     = top:GetAttribute("MaxHealth")
+    local vc     = top:GetAttribute("VictoryCents")
+
+    print("──── [TAT DEBUG] My Top ────")
+    print("  State:                 ", tostring(state))
+    print("  AngularVelocity attr:  ", tostring(avAttr))
+    print("  MaxHealth:             ", tostring(mh))
+    print("  VictoryCents:          ", tostring(vc))
+    print("  PrimaryPart:           ", tostring(primary))
+    if avAttr then
+        print("  → Attr RPM (Y*150):   ", math.floor(math.abs(avAttr.Y) * RPM_MULT))
+    end
+    if mh and mh > 0 then
+        print("  → MaxRPM (MH*20):     ", math.floor(mh * 20))
+    end
+    -- Dump all parts with non-zero angular velocity
+    print("  → Scanning all parts for AssemblyAngularVelocity:")
+    local bestY = 0
+    for _, part in ipairs(top:GetDescendants()) do
+        if part:IsA("BasePart") then
+            local av = part.AssemblyAngularVelocity
+            if av and math.abs(av.Y) > 0.001 then
+                print(string.format("     [%s] Y=%.4f → RPM=%d", part.Name, av.Y, math.floor(math.abs(av.Y)*RPM_MULT)))
+                if math.abs(av.Y) > bestY then bestY = math.abs(av.Y) end
+            end
+        end
+    end
+    local bestRPM = math.floor(bestY * RPM_MULT)
+    print("  → Best physics RPM:   ", bestRPM)
+    print("────────────────────────────")
+
+    Rayfield:Notify({
+        Title = "Debug Printed",
+        Content = "State:"..tostring(state)..
+                  " | BestPhysRPM:"..bestRPM..
+                  " | AttrRPM:"..(avAttr and math.floor(math.abs(avAttr.Y)*RPM_MULT) or "nil")..
+                  " | MaxRPM:"..(mh and math.floor(mh*20) or "nil"),
+        Duration = 8
+    })
 end })
 
 -- ── Misc Tab ──────────────────────────────────────────────────────────────────
@@ -1039,6 +1397,32 @@ toggleCallbacks["AntiAFK"] = onAntiAFK
 MiscTab:CreateToggle({ Name="Anti AFK", CurrentValue=startFlags.AntiAFK, Flag="AntiAFK", Callback=onAntiAFK })
 if startFlags.AntiAFK then onAntiAFK(true) end
 
+-- ── FreeCam ───────────────────────────────────────────────────────────────────
+MiscTab:CreateSection("FreeCam")
+
+local freecamLoaded = false
+MiscTab:CreateToggle({
+    Name = "FreeCam",
+    CurrentValue = false,
+    Flag = "FreeCam",
+    Callback = function(value)
+        if value then
+            if not freecamLoaded then
+                pcall(function()
+                    loadstring(game:HttpGet("https://raw.githubusercontent.com/boatbomber/FreeCam/main/src/FreeCam.client.lua"))()
+                end)
+                freecamLoaded = true
+            end
+            Rayfield:Notify({ Title="FreeCam", Content="Loaded! Press Shift+P in-game to toggle.", Duration=5 })
+        else
+            local cam = workspace.CurrentCamera
+            if cam then cam.CameraType = Enum.CameraType.Custom end
+            Rayfield:Notify({ Title="FreeCam", Content="Camera restored. Press Shift+P to fully exit FreeCam.", Duration=4 })
+        end
+    end,
+})
+
+-- ── Server ────────────────────────────────────────────────────────────────────
 MiscTab:CreateSection("Server")
 local TeleportService = game:GetService("TeleportService")
 MiscTab:CreateButton({ Name="Rejoin", Callback=function()
