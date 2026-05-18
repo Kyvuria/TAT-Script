@@ -17,6 +17,25 @@ local function saveAllConfigs(configs)
     return ok2
 end
 
+-- ── Meteor time persistence ───────────────────────────────────────────────────
+local METEOR_TIME_FILE = "TAT_MeteorTime.json"
+
+local function loadLastMeteorTime()
+    local ok, data = pcall(function() return readfile(METEOR_TIME_FILE) end)
+    if not ok or not data or data == "" then return nil end
+    local ok2, parsed = pcall(function() return HttpService:JSONDecode(data) end)
+    if ok2 and type(parsed) == "table" and parsed.lastSpawn then
+        return parsed.lastSpawn
+    end
+    return nil
+end
+
+local function saveLastMeteorTime(t)
+    pcall(function()
+        writefile(METEOR_TIME_FILE, HttpService:JSONEncode({ lastSpawn = t }))
+    end)
+end
+
 local startFlags = {
     AutoLaunchCycle      = false,
     AutoPerfectLaunch    = false,
@@ -96,8 +115,6 @@ local autoLaunchRunning = false
 local isDoingLaunchCycle = false
 
 -- ── WalkSpeed / JumpPower ─────────────────────────────────────────────────────
--- Sprint speed is 34. When game sets WS to 34 we know sprinting started.
--- We let the game do its thing and only enforce our value when WS is not 34.
 local currentWSValue = 16
 local currentJPValue = 50
 
@@ -106,8 +123,6 @@ RunService.Heartbeat:Connect(function()
     local h = char and char:FindFirstChild("Humanoid")
     if not h then return end
     local ws = h.WalkSpeed
-    -- If game set it to sprint speed (34), leave it alone
-    -- If it is anything else and not our value, correct it
     if ws ~= 34 and ws ~= currentWSValue then
         h.WalkSpeed = currentWSValue
     end
@@ -432,7 +447,6 @@ local function doAutoLaunchCycle()
 
     if not savedLaunchCFrame then savedLaunchCFrame = hrp.CFrame end
 
-    -- Step 1: wait for top to stop spinning
     if isTopInArena() then
         local battleTimeout = tick() + 180
         repeat
@@ -443,7 +457,6 @@ local function doAutoLaunchCycle()
         task.wait(1.5)
     end
 
-    -- Step 2: walk to top and pick it up
     if getMyTop() ~= nil then
         local pickupTimeout = tick() + 30
         repeat task.wait(0.3) until topNeedsPickup() or topIsInHand() or tick() > pickupTimeout
@@ -467,7 +480,6 @@ local function doAutoLaunchCycle()
         end
     end
 
-    -- Step 3: wait until top is in hand
     local handTimeout = tick() + 10
     repeat task.wait(0.3) until topIsInHand() or tick() > handTimeout
 
@@ -480,7 +492,6 @@ local function doAutoLaunchCycle()
 
     if not autoLaunchRunning then isDoingLaunchCycle = false return end
 
-    -- Step 4: return to launch spot
     local standPos = savedLaunchCFrame.Position
     stuckCount = 0 lastPos = nil
     humanoid:MoveTo(standPos)
@@ -492,11 +503,10 @@ local function doAutoLaunchCycle()
     until (hrp.Position - standPos).Magnitude < 4 or tick() > returnTimeout
 
     hrp.CFrame = savedLaunchCFrame
-    task.wait(2) -- wait 2s so shift lock settles before launching
+    task.wait(2)
 
     if not autoLaunchRunning then isDoingLaunchCycle = false return end
 
-    -- Step 5: launch
     pressKey(Enum.KeyCode.E)
     task.wait(1.5)
     if not autoLaunchRunning then isDoingLaunchCycle = false return end
@@ -808,10 +818,23 @@ local METEOR_INTERVAL = 15 * 60
 local meteorTimerGui = nil
 local meteorTimerConnection = nil
 local meteorTimerAddedConn = nil
+local meteorTimerRemovedConn = nil
 local lastMeteorCycleStart = nil
-local meteorSpawnedThisCycle = false
 local meteorCycleResultShown = false
 local meteorStatusText = ""
+
+-- Only treat Models/Parts as real meteors, not script/config children
+local function isRealMeteor(child)
+    return child:IsA("Model") or child:IsA("Part") or child:IsA("BasePart")
+end
+
+local function getLiveMeteorCount()
+    local count = 0
+    for _, child in ipairs(workspace.Map.Meteors:GetChildren()) do
+        if isRealMeteor(child) then count += 1 end
+    end
+    return count
+end
 
 local function buildMeteorTimerGui()
     local old = playerGui:FindFirstChild("MeteorTimerGui") if old then old:Destroy() end
@@ -848,7 +871,7 @@ local function buildMeteorTimerGui()
     titleLabel.Position = UDim2.new(0,0,0,6) titleLabel.Font = Enum.Font.GothamBold
     titleLabel.TextSize = 15 titleLabel.TextColor3 = Color3.fromRGB(200,200,200)
     titleLabel.TextStrokeTransparency = 0.5 titleLabel.TextStrokeColor3 = Color3.fromRGB(0,0,0)
-    titleLabel.Text = "☄  METEOR SPAWN" titleLabel.ZIndex = 2 titleLabel.Parent = frame
+    titleLabel.Text = "☄  METEOR SPAWN TIMER" titleLabel.ZIndex = 2 titleLabel.Parent = frame
     local countdownLabel = Instance.new("TextLabel")
     countdownLabel.Name = "Countdown" countdownLabel.BackgroundTransparency = 1
     countdownLabel.Size = UDim2.new(1,0,0,36) countdownLabel.Position = UDim2.new(0,0,0,30)
@@ -874,39 +897,111 @@ local function formatTime(secs)
     return string.format("%02d : %02d", math.floor(secs/60), secs%60)
 end
 
-local function onMeteorSpawned()
-    lastMeteorCycleStart = tick() meteorSpawnedThisCycle = true meteorCycleResultShown = false
-    meteorStatusText = "Spawned!"
-    if meteorTimerGui then meteorTimerGui.status.Text = "Spawned!" meteorTimerGui.status.TextColor3 = Color3.fromRGB(100,255,100) end
-end
-
-local function onMeteorCycleEnd(spawned)
-    if spawned then
-        meteorStatusText = "Spawned!"
-        if meteorTimerGui then meteorTimerGui.status.Text = "Spawned!" meteorTimerGui.status.TextColor3 = Color3.fromRGB(100,255,100) end
-    else
-        meteorStatusText = "Not Spawned"
-        if meteorTimerGui then meteorTimerGui.status.Text = "Not Spawned" meteorTimerGui.status.TextColor3 = Color3.fromRGB(255,80,80) end
+local function setMeteorStatus(text, color)
+    meteorStatusText = text
+    if meteorTimerGui then
+        meteorTimerGui.status.Text = text
+        meteorTimerGui.status.TextColor3 = color
     end
-    lastMeteorCycleStart = tick() meteorSpawnedThisCycle = false
 end
 
 local function startMeteorTimer()
     buildMeteorTimerGui()
-    if not lastMeteorCycleStart then
-        lastMeteorCycleStart = tick() meteorSpawnedThisCycle = false meteorCycleResultShown = false meteorStatusText = ""
+
+    -- NEW: flag to prevent stacking "waiting" tasks
+    local waitingTaskActive = false
+
+    -- NEW: helper that waits 30s after despawn then shows "Waiting for meteor to spawn..."
+    local function scheduleWaitingStatus()
+        if waitingTaskActive then return end
+        waitingTaskActive = true
+        task.spawn(function()
+            task.wait(30)
+            if not waitingTaskActive then return end -- cancelled by a new spawn
+            if not meteorESPEnabled then waitingTaskActive = false return end
+            if getLiveMeteorCount() == 0 and not meteorStatusText:find("Spawned") then
+                setMeteorStatus("Waiting for meteor to spawn...", Color3.fromRGB(180,180,180))
+            end
+            waitingTaskActive = false
+        end)
     end
-    local spawnDebounce = false
-    meteorTimerAddedConn = workspace.Map.Meteors.ChildAdded:Connect(function()
-        if spawnDebounce then return end
-        spawnDebounce = true task.delay(1, function() spawnDebounce = false end)
-        onMeteorSpawned()
+
+    -- Always show "Waiting..." on enable/join/rejoin (unless meteors already present)
+    -- Sync timer from saved spawn time so countdown is accurate
+    if not lastMeteorCycleStart then
+        local savedUnix = loadLastMeteorTime()
+        if savedUnix then
+            local secondsSinceLastSpawn = (os.time() - savedUnix) % METEOR_INTERVAL
+            lastMeteorCycleStart = tick() - secondsSinceLastSpawn
+            meteorCycleResultShown = false
+            local remaining = math.floor(METEOR_INTERVAL - secondsSinceLastSpawn)
+            Rayfield:Notify({
+                Title = "Meteor Timer",
+                Content = "Synced! ~" .. math.floor(remaining / 60) .. "m " .. (remaining % 60) .. "s remaining.",
+                Duration = 5
+            })
+        else
+            lastMeteorCycleStart = tick()
+            meteorCycleResultShown = false
+        end
+    end
+
+    -- NEW: always show "Waiting..." on join/rejoin unless meteors already present
+    local existingCount = getLiveMeteorCount()
+    if existingCount > 0 then
+        setMeteorStatus("Spawned! (" .. existingCount .. ")", Color3.fromRGB(100,255,100))
+    else
+        setMeteorStatus("Waiting for meteor to spawn...", Color3.fromRGB(180,180,180))
+    end
+
+    -- Watch for new real meteors being added
+    meteorTimerAddedConn = workspace.Map.Meteors.ChildAdded:Connect(function(child)
+        if not isRealMeteor(child) then return end
+        task.wait(0.2)
+        if not meteorESPEnabled then return end
+        -- NEW: cancel any pending "waiting" task since a meteor just spawned
+        waitingTaskActive = false
+        local count = getLiveMeteorCount()
+        setMeteorStatus("Spawned! (" .. count .. ")", Color3.fromRGB(100,255,100))
+        lastMeteorCycleStart = tick()
+        meteorCycleResultShown = false
+        saveLastMeteorTime(os.time())
     end)
+
+    -- Watch for meteors being removed (picked up or despawned)
+    meteorTimerRemovedConn = workspace.Map.Meteors.ChildRemoved:Connect(function(child)
+        if not isRealMeteor(child) then return end
+        task.wait(0.2)
+        if not meteorESPEnabled then return end
+        local remaining = getLiveMeteorCount()
+        if remaining > 0 then
+            setMeteorStatus("Spawned! (" .. remaining .. ")", Color3.fromRGB(100,255,100))
+        else
+            if meteorStatusText:find("Spawned") then
+                setMeteorStatus("Despawned", Color3.fromRGB(255,140,0))
+            end
+            lastMeteorCycleStart = tick()
+            meteorCycleResultShown = false
+            -- NEW: schedule "Waiting for meteor to spawn..." 30s after despawn
+            scheduleWaitingStatus()
+        end
+    end)
+
+    -- Heartbeat: drive the countdown display
     meteorTimerConnection = RunService.Heartbeat:Connect(function()
         if not meteorTimerGui or not lastMeteorCycleStart then return end
-        local remaining = METEOR_INTERVAL - (tick() - lastMeteorCycleStart)
+        local elapsed = tick() - lastMeteorCycleStart
+        local remaining = METEOR_INTERVAL - elapsed
+
         if remaining <= 0 then
-            if not meteorCycleResultShown then meteorCycleResultShown = true onMeteorCycleEnd(meteorSpawnedThisCycle) end
+            if not meteorCycleResultShown then
+                meteorCycleResultShown = true
+                if getLiveMeteorCount() == 0 and not meteorStatusText:find("Spawned") then
+                    setMeteorStatus("Not Spawned", Color3.fromRGB(255,80,80))
+                end
+                lastMeteorCycleStart = tick()
+                meteorCycleResultShown = false
+            end
             meteorTimerGui.countdown.Text = "00 : 00"
         else
             meteorCycleResultShown = false
@@ -916,13 +1011,17 @@ local function startMeteorTimer()
             elseif pct > 0.2 then meteorTimerGui.countdown.TextColor3 = Color3.fromRGB(255,165,0)
             else meteorTimerGui.countdown.TextColor3 = Color3.fromRGB(255,60,60) end
         end
-        if meteorTimerGui.status.Text ~= meteorStatusText then meteorTimerGui.status.Text = meteorStatusText end
+
+        if meteorTimerGui.status.Text ~= meteorStatusText then
+            meteorTimerGui.status.Text = meteorStatusText
+        end
     end)
 end
 
 local function stopMeteorTimer()
     if meteorTimerConnection then meteorTimerConnection:Disconnect() meteorTimerConnection = nil end
     if meteorTimerAddedConn then meteorTimerAddedConn:Disconnect() meteorTimerAddedConn = nil end
+    if meteorTimerRemovedConn then meteorTimerRemovedConn:Disconnect() meteorTimerRemovedConn = nil end
     destroyMeteorTimerGui()
 end
 
@@ -972,6 +1071,7 @@ local function startMeteorESP()
     for _, meteor in ipairs(workspace.Map.Meteors:GetChildren()) do createMeteorESP(meteor) end
     meteorAddedConnection = workspace.Map.Meteors.ChildAdded:Connect(function(meteor)
         if not meteorESPEnabled then return end
+        if not isRealMeteor(meteor) then return end
         local core = meteor:FindFirstChild("Core")
         if not core then local deadline = tick()+3 repeat task.wait(0.1) core = meteor:FindFirstChild("Core") until core or tick()>deadline end
         if core then createMeteorESP(meteor) end
@@ -1423,7 +1523,6 @@ end })
 local MiscTab = Window:CreateTab("Misc", 4483362458)
 MiscTab:CreateSection("Character")
 
--- Walk Speed: 16 (default) to 45. Always enforced every frame.
 MiscTab:CreateSlider({
     Name = "Walk Speed", Range = {16, 45}, Increment = 1,
     Suffix = " studs/s", CurrentValue = 16, Flag = "WalkSpeed",
@@ -1432,7 +1531,6 @@ MiscTab:CreateSlider({
     end,
 })
 
--- Jump Power: 50 (default) to 100. Always enforced every frame.
 MiscTab:CreateSlider({
     Name = "Jump Power", Range = {50, 100}, Increment = 5,
     Suffix = " power", CurrentValue = 50, Flag = "JumpPower",
