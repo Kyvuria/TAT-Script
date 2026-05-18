@@ -814,37 +814,57 @@ local meteorESPEnabled = false
 local meteorAddedConnection = nil
 local meteorRemovedConnections = {}
 
-local METEOR_INTERVAL = 15 * 60
-local meteorTimerGui = nil
-local meteorTimerConnection = nil
-local meteorTimerAddedConn = nil
-local meteorTimerRemovedConn = nil
-local lastMeteorCycleStart = nil
-local meteorCycleResultShown = false
-local meteorStatusText = ""
+local METEOR_INTERVAL      = 15 * 60
+local MIN_PLAYERS_REQUIRED = 4
 
--- Only treat Models/Parts as real meteors, not script/config children
-local function isRealMeteor(child)
-    return child:IsA("Model") or child:IsA("Part") or child:IsA("BasePart")
+local meteorTimerGui            = nil
+local meteorTimerConnection     = nil
+local meteorTimerAddedConn      = nil
+local meteorTimerRemovedConn    = nil
+local lastMeteorCycleStart      = nil
+local meteorCycleResultShown    = false
+local meteorStatusText          = ""
+local meteorOverrideText        = ""
+local meteorOverrideColor       = Color3.fromRGB(100,255,100)
+
+local isPlayerCountLow = false
+
+local function getServerPlayerCount()
+    return #Players:GetPlayers()
 end
 
-local function getLiveMeteorCount()
-    local count = 0
-    for _, child in ipairs(workspace.Map.Meteors:GetChildren()) do
-        if isRealMeteor(child) then count += 1 end
+local function setMeteorStatus(text, color)
+    meteorStatusText = text
+    if meteorTimerGui then
+        meteorTimerGui.status.Text       = text
+        meteorTimerGui.status.TextColor3 = color
     end
-    return count
 end
 
+local function updateStatusLabel()
+    if not meteorTimerGui then return end
+    if meteorOverrideText ~= "" then
+        setMeteorStatus(meteorOverrideText, meteorOverrideColor)
+    elseif isPlayerCountLow then
+        setMeteorStatus("Paused – need " .. MIN_PLAYERS_REQUIRED .. "+ players (" .. getServerPlayerCount() .. " now)", Color3.fromRGB(200, 180, 0))
+    else
+        if meteorStatusText == "" or meteorStatusText:find("Paused") or meteorStatusText:find("Resumed") then
+            setMeteorStatus("Waiting for meteors to spawn...", Color3.fromRGB(180,180,180))
+        end
+    end
+end
+
+-- ── GUI ───────────────────────────────────────────────────────────────────────
 local function buildMeteorTimerGui()
     local old = playerGui:FindFirstChild("MeteorTimerGui") if old then old:Destroy() end
     local sg = Instance.new("ScreenGui")
     sg.Name = "MeteorTimerGui" sg.ResetOnSpawn = false sg.DisplayOrder = 999 sg.Parent = playerGui
     local frame = Instance.new("Frame")
     frame.BackgroundColor3 = Color3.fromRGB(10,10,20) frame.BackgroundTransparency = 0.3
-    frame.BorderSizePixel = 0 frame.Size = UDim2.new(0,280,0,90)
-    frame.Position = UDim2.new(0.5,-140,0,12) frame.Parent = sg
+    frame.BorderSizePixel = 0 frame.Size = UDim2.new(0,300,0,90)
+    frame.Position = UDim2.new(0.5,-150,0,12) frame.Parent = sg
     local corner = Instance.new("UICorner") corner.CornerRadius = UDim.new(0,8) corner.Parent = frame
+
     local dragHandle = Instance.new("TextButton")
     dragHandle.Name = "DragHandle" dragHandle.BackgroundTransparency = 1
     dragHandle.Size = UDim2.new(1,0,0,34) dragHandle.Position = UDim2.new(0,0,0,0)
@@ -866,24 +886,28 @@ local function buildMeteorTimerGui()
             frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
         end
     end)
+
     local titleLabel = Instance.new("TextLabel")
     titleLabel.BackgroundTransparency = 1 titleLabel.Size = UDim2.new(1,0,0,28)
     titleLabel.Position = UDim2.new(0,0,0,6) titleLabel.Font = Enum.Font.GothamBold
     titleLabel.TextSize = 15 titleLabel.TextColor3 = Color3.fromRGB(200,200,200)
     titleLabel.TextStrokeTransparency = 0.5 titleLabel.TextStrokeColor3 = Color3.fromRGB(0,0,0)
     titleLabel.Text = "☄  METEOR SPAWN TIMER" titleLabel.ZIndex = 2 titleLabel.Parent = frame
+
     local countdownLabel = Instance.new("TextLabel")
     countdownLabel.Name = "Countdown" countdownLabel.BackgroundTransparency = 1
     countdownLabel.Size = UDim2.new(1,0,0,36) countdownLabel.Position = UDim2.new(0,0,0,30)
     countdownLabel.Font = Enum.Font.GothamBold countdownLabel.TextSize = 28
     countdownLabel.TextColor3 = Color3.fromRGB(180,120,255) countdownLabel.TextStrokeTransparency = 0
     countdownLabel.TextStrokeColor3 = Color3.fromRGB(0,0,0) countdownLabel.Text = "-- : --" countdownLabel.Parent = frame
+
     local statusLabel = Instance.new("TextLabel")
     statusLabel.Name = "Status" statusLabel.BackgroundTransparency = 1
     statusLabel.Size = UDim2.new(1,0,0,20) statusLabel.Position = UDim2.new(0,0,0,66)
     statusLabel.Font = Enum.Font.GothamBold statusLabel.TextSize = 13
     statusLabel.TextColor3 = Color3.fromRGB(100,255,100) statusLabel.TextStrokeTransparency = 0.5
     statusLabel.TextStrokeColor3 = Color3.fromRGB(0,0,0) statusLabel.Text = "" statusLabel.Parent = frame
+
     meteorTimerGui = { sg=sg, countdown=countdownLabel, status=statusLabel }
 end
 
@@ -897,47 +921,48 @@ local function formatTime(secs)
     return string.format("%02d : %02d", math.floor(secs/60), secs%60)
 end
 
-local function setMeteorStatus(text, color)
-    meteorStatusText = text
-    if meteorTimerGui then
-        meteorTimerGui.status.Text = text
-        meteorTimerGui.status.TextColor3 = color
-    end
+local function isRealMeteor(child)
+    return child:IsA("Model") or child:IsA("Part") or child:IsA("BasePart")
 end
 
+local function getLiveMeteorCount()
+    local count = 0
+    for _, child in ipairs(workspace.Map.Meteors:GetChildren()) do
+        if isRealMeteor(child) then count += 1 end
+    end
+    return count
+end
+
+-- ── Main timer start / stop ───────────────────────────────────────────────────
 local function startMeteorTimer()
     buildMeteorTimerGui()
 
-    -- NEW: flag to prevent stacking "waiting" tasks
     local waitingTaskActive = false
-
-    -- NEW: helper that waits 30s after despawn then shows "Waiting for meteor to spawn..."
     local function scheduleWaitingStatus()
         if waitingTaskActive then return end
         waitingTaskActive = true
         task.spawn(function()
             task.wait(30)
-            if not waitingTaskActive then return end -- cancelled by a new spawn
+            if not waitingTaskActive then return end
             if not meteorESPEnabled then waitingTaskActive = false return end
-            if getLiveMeteorCount() == 0 and not meteorStatusText:find("Spawned") then
-                setMeteorStatus("Waiting for meteor to spawn...", Color3.fromRGB(180,180,180))
+            if getLiveMeteorCount() == 0 and meteorOverrideText == "" then
+                setMeteorStatus("Waiting for meteors to spawn...", Color3.fromRGB(180,180,180))
             end
             waitingTaskActive = false
         end)
     end
 
-    -- Always show "Waiting..." on enable/join/rejoin (unless meteors already present)
-    -- Sync timer from saved spawn time so countdown is accurate
+    -- Sync from saved time
     if not lastMeteorCycleStart then
         local savedUnix = loadLastMeteorTime()
         if savedUnix then
-            local secondsSinceLastSpawn = (os.time() - savedUnix) % METEOR_INTERVAL
-            lastMeteorCycleStart = tick() - secondsSinceLastSpawn
+            local secondsSince = (os.time() - savedUnix) % METEOR_INTERVAL
+            lastMeteorCycleStart = tick() - secondsSince
             meteorCycleResultShown = false
-            local remaining = math.floor(METEOR_INTERVAL - secondsSinceLastSpawn)
+            local remaining = math.floor(METEOR_INTERVAL - secondsSince)
             Rayfield:Notify({
                 Title = "Meteor Timer",
-                Content = "Synced! ~" .. math.floor(remaining / 60) .. "m " .. (remaining % 60) .. "s remaining.",
+                Content = "Synced! ~" .. math.floor(remaining/60) .. "m " .. (remaining%60) .. "s remaining.",
                 Duration = 5
             })
         else
@@ -946,70 +971,107 @@ local function startMeteorTimer()
         end
     end
 
-    -- NEW: always show "Waiting..." on join/rejoin unless meteors already present
+    -- Initial meteor override state
     local existingCount = getLiveMeteorCount()
     if existingCount > 0 then
-        setMeteorStatus("Spawned! (" .. existingCount .. ")", Color3.fromRGB(100,255,100))
+        meteorOverrideText  = "Spawned! (" .. existingCount .. ")"
+        meteorOverrideColor = Color3.fromRGB(100,255,100)
     else
-        setMeteorStatus("Waiting for meteor to spawn...", Color3.fromRGB(180,180,180))
+        meteorOverrideText = ""
     end
 
-    -- Watch for new real meteors being added
+    -- Initial player count check
+    isPlayerCountLow = getServerPlayerCount() < MIN_PLAYERS_REQUIRED
+    if isPlayerCountLow then
+        setMeteorStatus("Paused – need " .. MIN_PLAYERS_REQUIRED .. "+ players (" .. getServerPlayerCount() .. " now)", Color3.fromRGB(200, 180, 0))
+    end
+    updateStatusLabel()
+
+    -- ── Meteor ChildAdded: reset timer cycle start on spawn only ─────────────
     meteorTimerAddedConn = workspace.Map.Meteors.ChildAdded:Connect(function(child)
         if not isRealMeteor(child) then return end
         task.wait(0.2)
         if not meteorESPEnabled then return end
-        -- NEW: cancel any pending "waiting" task since a meteor just spawned
         waitingTaskActive = false
         local count = getLiveMeteorCount()
-        setMeteorStatus("Spawned! (" .. count .. ")", Color3.fromRGB(100,255,100))
+        meteorOverrideText  = "Spawned! (" .. count .. ")"
+        meteorOverrideColor = Color3.fromRGB(100,255,100)
+        setMeteorStatus(meteorOverrideText, meteorOverrideColor)
         lastMeteorCycleStart = tick()
         meteorCycleResultShown = false
         saveLastMeteorTime(os.time())
     end)
 
-    -- Watch for meteors being removed (picked up or despawned)
+    -- ── Meteor ChildRemoved: ONLY update the status label, never reset timer ──
     meteorTimerRemovedConn = workspace.Map.Meteors.ChildRemoved:Connect(function(child)
         if not isRealMeteor(child) then return end
         task.wait(0.2)
         if not meteorESPEnabled then return end
         local remaining = getLiveMeteorCount()
         if remaining > 0 then
-            setMeteorStatus("Spawned! (" .. remaining .. ")", Color3.fromRGB(100,255,100))
+            meteorOverrideText  = "Spawned! (" .. remaining .. ")"
+            meteorOverrideColor = Color3.fromRGB(100,255,100)
+            setMeteorStatus(meteorOverrideText, meteorOverrideColor)
         else
-            if meteorStatusText:find("Spawned") then
-                setMeteorStatus("Despawned", Color3.fromRGB(255,140,0))
+            meteorOverrideText = ""
+            if not isPlayerCountLow then
+                setMeteorStatus("All meteors picked up", Color3.fromRGB(255,140,0))
+                scheduleWaitingStatus()
+            else
+                updateStatusLabel()
             end
-            lastMeteorCycleStart = tick()
-            meteorCycleResultShown = false
-            -- NEW: schedule "Waiting for meteor to spawn..." 30s after despawn
-            scheduleWaitingStatus()
         end
     end)
 
-    -- Heartbeat: drive the countdown display
+    -- ── Heartbeat: countdown + player-count polling ───────────────────────────
     meteorTimerConnection = RunService.Heartbeat:Connect(function()
-        if not meteorTimerGui or not lastMeteorCycleStart then return end
-        local elapsed = tick() - lastMeteorCycleStart
-        local remaining = METEOR_INTERVAL - elapsed
+        if not meteorTimerGui then return end
 
-        if remaining <= 0 then
-            if not meteorCycleResultShown then
-                meteorCycleResultShown = true
-                if getLiveMeteorCount() == 0 and not meteorStatusText:find("Spawned") then
-                    setMeteorStatus("Not Spawned", Color3.fromRGB(255,80,80))
-                end
-                lastMeteorCycleStart = tick()
-                meteorCycleResultShown = false
+        -- ── Player count ──────────────────────────────────────────────────────
+        local playerCount = getServerPlayerCount()
+        local lowNow = playerCount < MIN_PLAYERS_REQUIRED
+        if lowNow ~= isPlayerCountLow then
+            isPlayerCountLow = lowNow
+            if lowNow then
+                Rayfield:Notify({ Title="Meteor Timer", Content="⏸ Paused – only " .. playerCount .. " players.", Duration=4 })
+            else
+                Rayfield:Notify({ Title="Meteor Timer", Content="▶ Resumed – " .. playerCount .. " players.", Duration=4 })
             end
-            meteorTimerGui.countdown.Text = "00 : 00"
+            updateStatusLabel()
+        end
+
+        -- ── Countdown display ─────────────────────────────────────────────────
+        if isPlayerCountLow then
+            meteorTimerGui.countdown.Text = "-- : -- ⏸"
+            meteorTimerGui.countdown.TextColor3 = Color3.fromRGB(200,180,0)
         else
-            meteorCycleResultShown = false
-            meteorTimerGui.countdown.Text = formatTime(remaining)
-            local pct = remaining / METEOR_INTERVAL
-            if pct > 0.5 then meteorTimerGui.countdown.TextColor3 = Color3.fromRGB(180,120,255)
-            elseif pct > 0.2 then meteorTimerGui.countdown.TextColor3 = Color3.fromRGB(255,165,0)
-            else meteorTimerGui.countdown.TextColor3 = Color3.fromRGB(255,60,60) end
+            if not lastMeteorCycleStart then return end
+            local elapsed   = tick() - lastMeteorCycleStart
+            local remaining = METEOR_INTERVAL - elapsed
+
+            if remaining <= 0 then
+                if not meteorCycleResultShown then
+                    meteorCycleResultShown = true
+                    if getLiveMeteorCount() == 0 and meteorOverrideText == "" then
+                        setMeteorStatus("Not Spawned", Color3.fromRGB(255,80,80))
+                    end
+                    lastMeteorCycleStart   = tick()
+                    meteorCycleResultShown = false
+                end
+                meteorTimerGui.countdown.Text       = "00 : 00"
+                meteorTimerGui.countdown.TextColor3 = Color3.fromRGB(255,60,60)
+            else
+                meteorCycleResultShown = false
+                meteorTimerGui.countdown.Text = formatTime(remaining)
+                local pct = remaining / METEOR_INTERVAL
+                if pct > 0.5 then
+                    meteorTimerGui.countdown.TextColor3 = Color3.fromRGB(180,120,255)
+                elseif pct > 0.2 then
+                    meteorTimerGui.countdown.TextColor3 = Color3.fromRGB(255,165,0)
+                else
+                    meteorTimerGui.countdown.TextColor3 = Color3.fromRGB(255,60,60)
+                end
+            end
         end
 
         if meteorTimerGui.status.Text ~= meteorStatusText then
@@ -1019,12 +1081,16 @@ local function startMeteorTimer()
 end
 
 local function stopMeteorTimer()
-    if meteorTimerConnection then meteorTimerConnection:Disconnect() meteorTimerConnection = nil end
-    if meteorTimerAddedConn then meteorTimerAddedConn:Disconnect() meteorTimerAddedConn = nil end
+    if meteorTimerConnection  then meteorTimerConnection:Disconnect()  meteorTimerConnection  = nil end
+    if meteorTimerAddedConn   then meteorTimerAddedConn:Disconnect()   meteorTimerAddedConn   = nil end
     if meteorTimerRemovedConn then meteorTimerRemovedConn:Disconnect() meteorTimerRemovedConn = nil end
     destroyMeteorTimerGui()
+    isPlayerCountLow      = false
+    meteorOverrideText    = ""
+    meteorStatusText      = ""
 end
 
+-- ── Meteor ESP visual helpers ─────────────────────────────────────────────────
 local function createMeteorESP(meteor)
     local core = meteor:FindFirstChild("Core") if not core then return end
     if core:FindFirstChild("MeteorESP") then return end
@@ -1482,41 +1548,6 @@ end
 ESPTab:CreateToggle({ Name="Top Inspector", CurrentValue=false, Flag="TopInspector", Callback=onTopInspector })
 ESPTab:CreateButton({ Name="Refresh Tops", Callback=function()
     refreshTopInspector() Rayfield:Notify({ Title="Top Inspector", Content="Refreshed!", Duration=2 })
-end })
-
-ESPTab:CreateSection("Debug")
-ESPTab:CreateButton({ Name="Print My Top Data", Callback=function()
-    local top = workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
-    if not top then
-        Rayfield:Notify({ Title="Debug", Content="No top found in workspace.Tops!", Duration=4 })
-        print("[TAT DEBUG] No top found for UserId:", LocalPlayer.UserId) return
-    end
-    local avAttr = top:GetAttribute("AngularVelocity")
-    local state = top:GetAttribute("State")
-    local mh = top:GetAttribute("MaxHealth")
-    local vc = top:GetAttribute("VictoryCents")
-    print("──── [TAT DEBUG] My Top ────")
-    print("  State:", tostring(state)) print("  AngularVelocity attr:", tostring(avAttr))
-    print("  MaxHealth:", tostring(mh)) print("  VictoryCents:", tostring(vc))
-    if avAttr then print("  → Attr RPM (Y*150):", math.floor(math.abs(avAttr.Y) * RPM_MULT)) end
-    if mh and mh > 0 then print("  → MaxRPM (MH*20):", math.floor(mh * 20)) end
-    local bestY = 0
-    for _, part in ipairs(top:GetDescendants()) do
-        if part:IsA("BasePart") then
-            local av = part.AssemblyAngularVelocity
-            if av and math.abs(av.Y) > 0.001 then
-                print(string.format("     [%s] Y=%.4f → RPM=%d", part.Name, av.Y, math.floor(math.abs(av.Y)*RPM_MULT)))
-                if math.abs(av.Y) > bestY then bestY = math.abs(av.Y) end
-            end
-        end
-    end
-    local bestRPM = math.floor(bestY * RPM_MULT)
-    print("  → Best physics RPM:", bestRPM) print("────────────────────────────")
-    Rayfield:Notify({
-        Title = "Debug Printed",
-        Content = "State:"..tostring(state).." | BestPhysRPM:"..bestRPM.." | MaxRPM:"..(mh and math.floor(mh*20) or "nil"),
-        Duration = 8
-    })
 end })
 
 -- ── Misc Tab ──────────────────────────────────────────────────────────────────
