@@ -1842,26 +1842,57 @@ MiscRight:AddButton('Join Lowest Server', function()
     end)
 end)
 
-MiscRight:AddButton('Unload Script', function()
-    Notify("Requiem", "Unloading script...", 3)
-    task.spawn(function()
-        task.wait(0.3)
-        for flag, cb in pairs(toggleCallbacks) do
-            pcall(cb, false)
+-- ── UI Toggle Keybind ─────────────────────────────────────────────────────────
+local uiToggleKey = Enum.KeyCode.RightShift
+local uiKeybindConn = nil
+
+local function setupUIKeybind()
+    if uiKeybindConn then uiKeybindConn:Disconnect() end
+    uiKeybindConn = UserInputService.InputBegan:Connect(function(input, gp)
+        if gp then return end
+        if input.KeyCode == uiToggleKey then
+            Library:ToggleShown()
         end
-        pcall(function() if perfectConnection then perfectConnection:Disconnect() perfectConnection = nil end end)
-        pcall(function() if autoEnergyConnection then autoEnergyConnection:Disconnect() autoEnergyConnection = nil end end)
-        pcall(function() if acBypassTimerConnection then acBypassTimerConnection:Disconnect() acBypassTimerConnection = nil end end)
-        pcall(function() if stateKeeperConnection then stateKeeperConnection:Disconnect() stateKeeperConnection = nil end end)
-        pcall(function() if antiAFKConnection then antiAFKConnection:Disconnect() antiAFKConnection = nil end end)
-        pcall(function() if idledConnection then idledConnection:Disconnect() idledConnection = nil end end)
-        pcall(function() if meteorTimerConnection then meteorTimerConnection:Disconnect() meteorTimerConnection = nil end end)
-        pcall(function() if meteorTimerAddedConn then meteorTimerAddedConn:Disconnect() meteorTimerAddedConn = nil end end)
-        pcall(function() if meteorTimerRemovedConn then meteorTimerRemovedConn:Disconnect() meteorTimerRemovedConn = nil end end)
-        pcall(function() if meteorAddedConnection then meteorAddedConnection:Disconnect() meteorAddedConnection = nil end end)
-        pcall(function() if noclipConnection then noclipConnection:Disconnect() noclipConnection = nil end end)
-        trashFarmRunning = false blatantFarmRunning = false autoLaunchRunning = false masteryRunning = false
-        isFreezing = false
+    end)
+end
+setupUIKeybind()
+
+MiscRight:AddKeybind('UIToggleKeybind', {
+    Text    = 'UI Toggle Keybind',
+    Default = Enum.KeyCode.RightShift,
+    Callback = function(key)
+        uiToggleKey = key
+        setupUIKeybind()
+    end,
+})
+
+-- ── Unload Script ─────────────────────────────────────────────────────────────
+MiscRight:AddButton('Unload Script', function()
+    task.spawn(function()
+        -- Stop all farm loops immediately
+        trashFarmRunning   = false
+        blatantFarmRunning = false
+        autoLaunchRunning  = false
+        masteryRunning     = false
+        isDoingLaunchCycle = false
+        isFreezing         = false
+
+        -- Disconnect every named connection
+        local conns = {
+            perfectConnection, autoEnergyConnection, acBypassTimerConnection,
+            stateKeeperConnection, antiAFKConnection, idledConnection,
+            meteorTimerConnection, meteorTimerAddedConn, meteorTimerRemovedConn,
+            meteorAddedConnection, noclipConnection, uiKeybindConn,
+        }
+        for _, c in ipairs(conns) do pcall(function() if c then c:Disconnect() end end) end
+        perfectConnection       = nil autoEnergyConnection    = nil
+        acBypassTimerConnection = nil stateKeeperConnection   = nil
+        antiAFKConnection       = nil idledConnection         = nil
+        meteorTimerConnection   = nil meteorTimerAddedConn    = nil
+        meteorTimerRemovedConn  = nil meteorAddedConnection   = nil
+        noclipConnection        = nil uiKeybindConn           = nil
+
+        -- Clear all ESP and overlays
         pcall(stopPlayerESP)
         pcall(stopMeteorESP)
         pcall(stopMeteorTimer)
@@ -1871,99 +1902,29 @@ MiscRight:AddButton('Unload Script', function()
         pcall(clearAllTopBillboards)
         pcall(teardownTopInspectorListeners)
         pcall(destroyACBypassTimerGui)
+        pcall(destroyMeteorTimerGui)
+
+        -- Stop movement overrides
+        pcall(stopNoclip)
+        pcall(stopAutoSprint)
+
+        -- Restore character to default state
         local char = LocalPlayer.Character
-        local h = char and char:FindFirstChild("Humanoid")
+        local h   = char and char:FindFirstChild("Humanoid")
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if h then h.WalkSpeed = 16 h.UseJumpPower = true h.JumpPower = 50 end
+        if h then
+            h.WalkSpeed    = 16
+            h.UseJumpPower = true
+            h.JumpPower    = 50
+        end
         if hrp then hrp.Anchored = false end
-        stopNoclip()
-        stopAutoSprint()
-        task.wait(0.5)
+
+        -- Destroy the entire UI — this is a true unload
         pcall(function() Library:Destroy() end)
     end)
 end)
 
--- ── Config Tab ────────────────────────────────────────────────────────────────
--- ── FIX 4: Only "Saved Configs" left groupbox remains. "Create Config" groupbox removed.
---           ThemeManager/SaveManager kept so the built-in Configuration section still appears.
-local function getCurrentFlags()
-    return {
-        AutoLaunchCycle=toggleStates.AutoLaunchCycle, AutoPerfectLaunch=toggleStates.AutoPerfectLaunch,
-        AutoBuyBurger=toggleStates.AutoBuyBurger, AutoTrashFarm=toggleStates.AutoTrashFarm,
-        AutoTrashFarmBlatant=toggleStates.AutoTrashFarmBlatant, MeteorESP=toggleStates.MeteorESP,
-        PlayerESP=toggleStates.PlayerESP, GoldTrashESP=toggleStates.GoldTrashESP,
-        AutoStateKeeper=toggleStates.AutoStateKeeper, AntiAFK=toggleStates.AntiAFK,
-    }
-end
-
-local function applyFlags(flags)
-    for flag, value in pairs(flags) do
-        local cb = toggleCallbacks[flag]
-        if cb then toggleStates[flag] = value pcall(cb, value) end
-    end
-end
-
-local function getConfigNames()
-    local configs = loadAllConfigs()
-    local names = {}
-    for name in pairs(configs) do table.insert(names, name) end
-    table.sort(names)
-    if #names == 0 then table.insert(names, "No Configs Saved") end
-    return names
-end
-
-local ConfigLeft = Tabs.Config:AddLeftGroupbox('Saved Configs')
-
-local selectedConfig = ""
-local configNames    = getConfigNames()
-
-local configDropdown = ConfigLeft:AddDropdown('SelectedConfig', {
-    Text    = 'Select Config',
-    Values  = configNames,
-    Default = 1,
-    Callback = function(value)
-        selectedConfig = value ~= "No Configs Saved" and value or ""
-    end,
-})
-selectedConfig = configNames[1] ~= "No Configs Saved" and configNames[1] or ""
-
-local function refreshDropdown()
-    local names = getConfigNames()
-    local current = selectedConfig ~= "" and selectedConfig or names[1]
-    local found = false
-    for _, n in ipairs(names) do if n == current then found = true break end end
-    if not found then current = names[1] selectedConfig = current ~= "No Configs Saved" and current or "" end
-    pcall(function() configDropdown:SetValues(names) configDropdown:SetValue(current) end)
-end
-
-ConfigLeft:AddButton('Load Selected Config', function()
-    if selectedConfig == "" or selectedConfig == "No Configs Saved" then
-        Notify("Config", "Select a config first!", 3) return
-    end
-    local cfg = loadAllConfigs()[selectedConfig]
-    if cfg and cfg.flags then
-        applyFlags(cfg.flags)
-        local summary = ""
-        for flag, val in pairs(cfg.flags) do if val then summary = summary..flag.." " end end
-        Notify("Config Loaded: "..selectedConfig, summary~="" and "ON: "..summary or "All off", 5)
-    else Notify("Config", "Config not found!", 3) end
-end)
-
-ConfigLeft:AddButton('Delete Selected Config', function()
-    if selectedConfig == "" or selectedConfig == "No Configs Saved" then
-        Notify("Config", "Select a config to delete!", 3) return
-    end
-    local configs = loadAllConfigs()
-    if configs[selectedConfig] then
-        configs[selectedConfig] = nil
-        if saveAllConfigs(configs) then
-            Notify("Config", "Deleted: "..selectedConfig, 3)
-            selectedConfig = "" refreshDropdown()
-        end
-    else Notify("Config", "Not found!", 3) end
-end)
-
--- ── Theme & Save Manager — keeps the built-in Configuration section ───────────
+-- ── Config Tab — only SaveManager/ThemeManager built-in section ──────────────
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 SaveManager:SetIgnoreIndexes({})
@@ -1972,9 +1933,11 @@ SaveManager:BuildConfigSection(Tabs.Config)
 ThemeManager:BuildThemeSection(Tabs.Config)
 
 -- ── Final notify ──────────────────────────────────────────────────────────────
-task.spawn(function()
-    task.wait(3) refreshDropdown()
-    if autoLoadConfigName then Notify("Config", "Auto loaded: "..autoLoadConfigName, 4) end
-end)
+if autoLoadConfigName then
+    task.spawn(function()
+        task.wait(3)
+        Notify("Config", "Auto loaded: "..autoLoadConfigName, 4)
+    end)
+end
 
 Notify("Requiem", "Totally Accurate Tops loaded!", 3)
