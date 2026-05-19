@@ -131,7 +131,11 @@ local isDoingLaunchCycle   = false
 local currentWSValue = 16
 local currentJPValue = 50
 
+-- ── FIX 1: isFreezing guard so AC bypass freeze isn't overridden ──────────────
+local isFreezing = false
+
 RunService.Heartbeat:Connect(function()
+    if isFreezing then return end  -- don't fight the AC bypass freeze
     local char = LocalPlayer.Character
     local h = char and char:FindFirstChild("Humanoid")
     if not h then return end
@@ -639,7 +643,10 @@ end
 
 local function runACBypassTimer()
     buildACBypassTimerGui()
-    -- Freeze character by zeroing speed only — NO anchoring (anchoring causes physics launch on release)
+
+    -- ── FIX 2: set isFreezing so the main Heartbeat won't override WS/JP ─────
+    isFreezing = true
+
     local char = LocalPlayer.Character
     local humanoid = char and char:FindFirstChild("Humanoid")
     if humanoid then
@@ -647,7 +654,7 @@ local function runACBypassTimer()
         humanoid.UseJumpPower = true
         humanoid.JumpPower = 0
     end
-    -- Keep speed zeroed every frame so the server can't override it during the 10s
+
     local freezeConn = RunService.Heartbeat:Connect(function()
         local c = LocalPlayer.Character
         local h = c and c:FindFirstChild("Humanoid")
@@ -668,7 +675,9 @@ local function runACBypassTimer()
         if left <= 0 then
             acBypassTimerConnection:Disconnect() acBypassTimerConnection = nil
             freezeConn:Disconnect()
-            -- Restore movement
+            -- ── FIX 2 cont: clear freeze flag, stop noclip, restore movement ──
+            isFreezing = false
+            stopNoclip()
             local c2 = LocalPlayer.Character
             local h2 = c2 and c2:FindFirstChild("Humanoid")
             if h2 then h2.WalkSpeed = currentWSValue h2.UseJumpPower = true h2.JumpPower = currentJPValue end
@@ -809,6 +818,7 @@ MainLeft:AddDropdown('PreferredState', {
 })
 
 -- Tween To 1v1 Arena (with AC Bypass Timer)
+-- ── FIX 3: enable noclip before tweening so you don't get stuck underground ──
 MainLeft:AddButton('Tween To 1v1 Arena', function()
     local character = LocalPlayer.Character
     local hrp = character and character:FindFirstChild("HumanoidRootPart")
@@ -816,6 +826,8 @@ MainLeft:AddButton('Tween To 1v1 Arena', function()
     local destination = Vector3.new(1116.46, -57.50, 2266.39)
     local distance = (hrp.Position - destination).Magnitude
     local duration = distance / 80
+    -- Start noclip now so the tween through terrain doesn't get blocked
+    startNoclip()
     local tween = TweenService:Create(
         hrp,
         TweenInfo.new(duration, Enum.EasingStyle.Linear),
@@ -824,6 +836,7 @@ MainLeft:AddButton('Tween To 1v1 Arena', function()
     Notify("Tween", "Tweening to 1v1 Arena...", math.ceil(duration))
     tween:Play()
     tween.Completed:Connect(function()
+        -- runACBypassTimer will stop noclip when the 10s timer finishes
         task.spawn(runACBypassTimer)
     end)
 end)
@@ -1430,7 +1443,7 @@ local topInspectorEnabled = false
 local topInspectorConnections = {}
 local topBBCache = {}
 local topBuildLock = {}
-local topInspectorScale = 1.0  -- UI scale multiplier
+local topInspectorScale = 1.0
 
 local function getOwnerName(top)
     local ownerVal = top:FindFirstChild("Owner")
@@ -1539,7 +1552,7 @@ local function buildTopBillboard(top)
     local rpmPct = Instance.new("TextLabel")
     rpmPct.Name = "RPMPct" rpmPct.BackgroundTransparency = 1 rpmPct.Size = UDim2.new(0.5,-3,0, math.floor(RPM_LABEL_H * sc))
     rpmPct.Position = UDim2.new(0.5,0,0, math.floor(rpmLabelRow * sc)) rpmPct.Font = Enum.Font.GothamBold
-    rpmPct.TextSize = math.floor(20 * sc)  -- Bigger % label
+    rpmPct.TextSize = math.floor(20 * sc)
     rpmPct.TextColor3 = Color3.fromRGB(200,200,200) rpmPct.TextStrokeTransparency = 0.5
     rpmPct.TextStrokeColor3 = Color3.fromRGB(0,0,0) rpmPct.TextXAlignment = Enum.TextXAlignment.Right
     rpmPct.Text = "..." rpmPct.Parent = bb
@@ -1657,7 +1670,6 @@ ESPRight:AddButton('Refresh Tops', function()
     refreshTopInspector() Notify("Top Inspector", "Refreshed!", 2)
 end)
 
--- Top Inspector UI Scale slider
 ESPRight:AddSlider('TopInspectorScale', {
     Text     = 'Inspector UI Scale',
     Min      = 50, Max = 200, Default = 100,
@@ -1666,7 +1678,6 @@ ESPRight:AddSlider('TopInspectorScale', {
     Callback = function(value)
         topInspectorScale = value / 100
         if topInspectorEnabled then
-            -- Resize existing billboards in-place to avoid flicker (no destroy/rebuild)
             local sc = topInspectorScale
             local BASE_W = 260 local LINE_H = 14 local PAD = 4 local NUM_LINES = 10
             local RPM_LABEL_H = 20 local RPM_BAR_H = 22 local RPM_GAP = 6
@@ -1676,7 +1687,6 @@ ESPRight:AddSlider('TopInspectorScale', {
                     local bb = entry.bb
                     if not bb or not bb.Parent then return end
                     bb.Size = UDim2.new(0, math.floor(BASE_W * sc), 0, math.floor(totalH * sc))
-                    -- Resize all child labels and frames
                     local yPos = PAD
                     local lineIdx = 0
                     for _, child in ipairs(bb:GetChildren()) do
@@ -1702,7 +1712,6 @@ ESPRight:AddSlider('TopInspectorScale', {
                             if barText then barText.TextSize = math.floor(14 * sc) end
                         end
                     end
-                    -- Also resize the RPM title label (first TextLabel named nothing special at rpmLabelRow)
                     local rpmLabelRow = PAD + LINE_H * NUM_LINES + RPM_GAP
                     for _, child in ipairs(bb:GetChildren()) do
                         if child:IsA("TextLabel") and child.Text == "RPM" then
@@ -1837,11 +1846,9 @@ MiscRight:AddButton('Unload Script', function()
     Notify("Requiem", "Unloading script...", 3)
     task.spawn(function()
         task.wait(0.3)
-        -- Stop all toggles
         for flag, cb in pairs(toggleCallbacks) do
             pcall(cb, false)
         end
-        -- Stop misc connections
         pcall(function() if perfectConnection then perfectConnection:Disconnect() perfectConnection = nil end end)
         pcall(function() if autoEnergyConnection then autoEnergyConnection:Disconnect() autoEnergyConnection = nil end end)
         pcall(function() if acBypassTimerConnection then acBypassTimerConnection:Disconnect() acBypassTimerConnection = nil end end)
@@ -1853,9 +1860,8 @@ MiscRight:AddButton('Unload Script', function()
         pcall(function() if meteorTimerRemovedConn then meteorTimerRemovedConn:Disconnect() meteorTimerRemovedConn = nil end end)
         pcall(function() if meteorAddedConnection then meteorAddedConnection:Disconnect() meteorAddedConnection = nil end end)
         pcall(function() if noclipConnection then noclipConnection:Disconnect() noclipConnection = nil end end)
-        -- Stop farms
         trashFarmRunning = false blatantFarmRunning = false autoLaunchRunning = false masteryRunning = false
-        -- Clear all ESP
+        isFreezing = false
         pcall(stopPlayerESP)
         pcall(stopMeteorESP)
         pcall(stopMeteorTimer)
@@ -1864,9 +1870,7 @@ MiscRight:AddButton('Unload Script', function()
         pcall(clearDumpsterESP)
         pcall(clearAllTopBillboards)
         pcall(teardownTopInspectorListeners)
-        -- Clear bypass timer UI
         pcall(destroyACBypassTimerGui)
-        -- Restore character
         local char = LocalPlayer.Character
         local h = char and char:FindFirstChild("Humanoid")
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -1874,13 +1878,14 @@ MiscRight:AddButton('Unload Script', function()
         if hrp then hrp.Anchored = false end
         stopNoclip()
         stopAutoSprint()
-        -- Destroy the UI
         task.wait(0.5)
         pcall(function() Library:Destroy() end)
     end)
 end)
 
 -- ── Config Tab ────────────────────────────────────────────────────────────────
+-- ── FIX 4: Only "Saved Configs" left groupbox remains. "Create Config" groupbox removed.
+--           ThemeManager/SaveManager kept so the built-in Configuration section still appears.
 local function getCurrentFlags()
     return {
         AutoLaunchCycle=toggleStates.AutoLaunchCycle, AutoPerfectLaunch=toggleStates.AutoPerfectLaunch,
@@ -1907,8 +1912,7 @@ local function getConfigNames()
     return names
 end
 
-local ConfigLeft  = Tabs.Config:AddLeftGroupbox('Saved Configs')
-local ConfigRight = Tabs.Config:AddRightGroupbox('Create Config')
+local ConfigLeft = Tabs.Config:AddLeftGroupbox('Saved Configs')
 
 local selectedConfig = ""
 local configNames    = getConfigNames()
@@ -1959,41 +1963,13 @@ ConfigLeft:AddButton('Delete Selected Config', function()
     else Notify("Config", "Not found!", 3) end
 end)
 
-local configNameInput = ""
-ConfigRight:AddInput('ConfigName', {
-    Text        = 'Config Name',
-    Placeholder = 'Enter config name...',
-    ClearOnFocus = false,
-    Callback    = function(text) configNameInput = text end,
-})
-
-local autoLoadOnSave = false
-ConfigRight:AddToggle('ConfigAutoLoad', {
-    Text    = 'Auto Load on Execute',
-    Default = false,
-    Callback = function(value) autoLoadOnSave = value end,
-})
-
-ConfigRight:AddButton('Save Config', function()
-    local name = configNameInput
-    if not name or name == "" then Notify("Config", "Enter a name first!", 3) return end
-    local configs = loadAllConfigs()
-    if autoLoadOnSave then for _, v in pairs(configs) do v.autoLoad = false end end
-    local flags = getCurrentFlags()
-    configs[name] = { flags=flags, autoLoad=autoLoadOnSave }
-    if saveAllConfigs(configs) then
-        local summary = ""
-        for flag, val in pairs(flags) do if val then summary=summary..flag.." " end end
-        Notify("Saved: "..name, (summary~="" and "ON: "..summary or "All off")..(autoLoadOnSave and " | Auto Load ON" or ""), 5)
-        selectedConfig = name refreshDropdown()
-    end
-end)
-
--- ── Theme & Save Manager setup (no UI sections built to avoid duplicates) ──
+-- ── Theme & Save Manager — keeps the built-in Configuration section ───────────
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 SaveManager:SetIgnoreIndexes({})
 SaveManager:SetFolder('RequiemTAT')
+SaveManager:BuildConfigSection(Tabs.Config)
+ThemeManager:BuildThemeSection(Tabs.Config)
 
 -- ── Final notify ──────────────────────────────────────────────────────────────
 task.spawn(function()
