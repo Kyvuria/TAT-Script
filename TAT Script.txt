@@ -47,6 +47,7 @@ local startFlags = {
     GoldTrashESP         = false,
     AutoStateKeeper      = false,
     AntiAFK              = true,
+    AutoReEngage         = false,
 }
 local autoLoadConfigName = nil
 do
@@ -73,6 +74,8 @@ local Window = Library:CreateWindow({
     Center = true,
     AutoShow = true,
 })
+
+task.wait(0.1)
 
 local Tabs = {
     Main   = Window:AddTab('Main'),
@@ -106,6 +109,7 @@ local toggleStates = {
     AutoTrashFarmBlatant = false, MeteorESP            = false,
     PlayerESP            = false, GoldTrashESP         = false,
     AutoStateKeeper      = false, AntiAFK              = false,
+    AutoReEngage         = false,
 }
 local toggleCallbacks = {}
 
@@ -135,7 +139,7 @@ local currentJPValue = 50
 local isFreezing = false
 
 RunService.Heartbeat:Connect(function()
-    if isFreezing then return end  -- don't fight the AC bypass freeze
+    if isFreezing then return end
     local char = LocalPlayer.Character
     local h = char and char:FindFirstChild("Humanoid")
     if not h then return end
@@ -466,19 +470,24 @@ local function doAutoLaunchCycle()
         local pickupTimeout = tick() + 30
         repeat task.wait(0.3) until topNeedsPickup() or topIsInHand() or tick() > pickupTimeout
         if topNeedsPickup() then
-            local topPos = getTopPosition()
-            if topPos then
-                stuckCount = 0 lastPos = nil
-                humanoid:MoveTo(topPos)
-                local wt = tick() + 25
-                repeat
-                    task.wait(0.3)
-                    if not autoLaunchRunning then isDoingLaunchCycle = false return end
-                    local np = getTopPosition()
-                    if np then topPos = np humanoid:MoveTo(topPos) end
-                    checkStuck(hrp, humanoid, topPos) maybeJump(humanoid)
-                until (hrp.Position - (getTopPosition() or topPos)).Magnitude < 5 or tick() > wt
-                task.wait(0.3) pressKey(Enum.KeyCode.E) task.wait(0.8)
+            pressKey(Enum.KeyCode.E)
+            task.wait(0.8)
+            if not topIsInHand() and topNeedsPickup() then
+                Notify("Auto Launch", "Too far! Walking to bey...", 3)
+                local topPos = getTopPosition()
+                if topPos then
+                    stuckCount = 0 lastPos = nil
+                    humanoid:MoveTo(topPos)
+                    local wt = tick() + 25
+                    repeat
+                        task.wait(0.3)
+                        if not autoLaunchRunning then isDoingLaunchCycle = false return end
+                        local np = getTopPosition()
+                        if np then topPos = np humanoid:MoveTo(topPos) end
+                        checkStuck(hrp, humanoid, topPos) maybeJump(humanoid)
+                    until (hrp.Position - (getTopPosition() or topPos)).Magnitude < 5 or tick() > wt
+                    task.wait(0.3) pressKey(Enum.KeyCode.E) task.wait(0.8)
+                end
             end
         end
     end
@@ -593,7 +602,6 @@ local function buildACBypassTimerGui()
     frame.BorderSizePixel = 0 frame.Size = UDim2.new(0,300,0,90)
     frame.Position = UDim2.new(0.5,-150,0,12) frame.Parent = sg
     local corner = Instance.new("UICorner") corner.CornerRadius = UDim.new(0,8) corner.Parent = frame
-    -- Drag support
     local dragHandle = Instance.new("TextButton")
     dragHandle.Name = "DragHandle" dragHandle.BackgroundTransparency = 1
     dragHandle.Size = UDim2.new(1,0,0,34) dragHandle.Position = UDim2.new(0,0,0,0)
@@ -643,10 +651,7 @@ end
 
 local function runACBypassTimer()
     buildACBypassTimerGui()
-
-    -- ── FIX 2: set isFreezing so the main Heartbeat won't override WS/JP ─────
     isFreezing = true
-
     local char = LocalPlayer.Character
     local humanoid = char and char:FindFirstChild("Humanoid")
     if humanoid then
@@ -654,13 +659,11 @@ local function runACBypassTimer()
         humanoid.UseJumpPower = true
         humanoid.JumpPower = 0
     end
-
     local freezeConn = RunService.Heartbeat:Connect(function()
         local c = LocalPlayer.Character
         local h = c and c:FindFirstChild("Humanoid")
         if h then h.WalkSpeed = 0 h.JumpPower = 0 end
     end)
-
     local startTick = tick()
     if acBypassTimerConnection then acBypassTimerConnection:Disconnect() end
     acBypassTimerConnection = RunService.Heartbeat:Connect(function()
@@ -675,7 +678,6 @@ local function runACBypassTimer()
         if left <= 0 then
             acBypassTimerConnection:Disconnect() acBypassTimerConnection = nil
             freezeConn:Disconnect()
-            -- ── FIX 2 cont: clear freeze flag, stop noclip, restore movement ──
             isFreezing = false
             stopNoclip()
             local c2 = LocalPlayer.Character
@@ -691,9 +693,85 @@ local function runACBypassTimer()
     end)
 end
 
+-- ── Auto Re-Engage (1v1 pad reset) ───────────────────────────────────────────
+local autoReEngageConnection = nil
+local reEngageCooldown = false
+
+local function doReEngage()
+    if reEngageCooldown then return end
+    reEngageCooldown = true
+    task.spawn(function()
+        task.wait(1)
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+        task.wait(0.05)
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+        task.wait(0.12)
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+        task.wait(0.05)
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+        task.wait(3)
+        reEngageCooldown = false
+    end)
+end
+
+local function onAutoReEngage(value)
+    toggleStates.AutoReEngage = value
+    if autoReEngageConnection then autoReEngageConnection:Disconnect() autoReEngageConnection = nil end
+    reEngageCooldown = false
+
+    if not value then
+        Notify("Auto Re-Engage", "Stopped.", 3)
+        return
+    end
+
+    local wasInBattle = false
+    local watchedTop = nil
+    local topHealthConn = nil
+
+    local function hookTopHealth(top)
+        if topHealthConn then topHealthConn:Disconnect() topHealthConn = nil end
+        watchedTop = top
+        if not top then return end
+        topHealthConn = top.AttributeChanged:Connect(function(attr)
+            if attr ~= "Health" then return end
+            local health = top:GetAttribute("Health")
+            if wasInBattle and (not health or health <= 0) then
+                wasInBattle = false
+                doReEngage()
+            elseif health and health > 0 then
+                wasInBattle = true
+            end
+        end)
+    end
+
+    autoReEngageConnection = RunService.Heartbeat:Connect(function()
+        local top = getMyTop()
+        if top ~= watchedTop then
+            hookTopHealth(top)
+            if not top then
+                if wasInBattle then
+                    wasInBattle = false
+                    doReEngage()
+                end
+            end
+        end
+        if top then
+            local health = top:GetAttribute("Health")
+            if health and health > 0 then
+                wasInBattle = true
+            end
+        end
+    end)
+
+    Notify("Auto Re-Engage", "Started! Will press E×2 after each 1v1.", 4)
+end
+
+toggleCallbacks["AutoReEngage"] = onAutoReEngage
+
 -- ── Main Tab ──────────────────────────────────────────────────────────────────
-local MainLeft  = Tabs.Main:AddLeftGroupbox('Automations')
-local MainRight = Tabs.Main:AddRightGroupbox('Auto Trash')
+local MainLeft  = Tabs.Main:AddLeftGroupbox('Main Automations')
+local MainRight = Tabs.Main:AddRightGroupbox('Trash Automations')
+local Main1v1   = Tabs.Main:AddLeftGroupbox('1v1 Automations')
 
 -- Auto Launch Cycle
 local function onAutoLaunchCycle(value)
@@ -817,30 +895,6 @@ MainLeft:AddDropdown('PreferredState', {
     end,
 })
 
--- Tween To 1v1 Arena (with AC Bypass Timer)
--- ── FIX 3: enable noclip before tweening so you don't get stuck underground ──
-MainLeft:AddButton('Tween To 1v1 Arena', function()
-    local character = LocalPlayer.Character
-    local hrp = character and character:FindFirstChild("HumanoidRootPart")
-    if not hrp then Notify("Tween", "Character not found!", 3) return end
-    local destination = Vector3.new(1116.46, -57.50, 2266.39)
-    local distance = (hrp.Position - destination).Magnitude
-    local duration = distance / 80
-    -- Start noclip now so the tween through terrain doesn't get blocked
-    startNoclip()
-    local tween = TweenService:Create(
-        hrp,
-        TweenInfo.new(duration, Enum.EasingStyle.Linear),
-        { CFrame = CFrame.new(destination) }
-    )
-    Notify("Tween", "Tweening to 1v1 Arena...", math.ceil(duration))
-    tween:Play()
-    tween.Completed:Connect(function()
-        -- runACBypassTimer will stop noclip when the 10s timer finishes
-        task.spawn(runACBypassTimer)
-    end)
-end)
-
 -- Auto Eat Burger
 local lastBuy = 0
 local BUYCOOLDOWN = 8
@@ -899,6 +953,35 @@ MainRight:AddToggle('AutoTrashFarmBlatant', {
     Callback = onAutoTrashBlatant,
 })
 if startFlags.AutoTrashFarmBlatant then onAutoTrashBlatant(true) end
+
+-- ── 1v1 Groupbox ─────────────────────────────────────────────────────────────
+
+Main1v1:AddToggle('AutoReEngage', {
+    Text    = 'Auto Re-Engage 1v1 Pad',
+    Default = startFlags.AutoReEngage,
+    Callback = onAutoReEngage,
+})
+if startFlags.AutoReEngage then onAutoReEngage(true) end
+
+Main1v1:AddButton('Tween To 1v1 Arena', function()
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if not hrp then Notify("Tween", "Character not found!", 3) return end
+    local destination = Vector3.new(1116.46, -57.50, 2266.39)
+    local distance = (hrp.Position - destination).Magnitude
+    local duration = distance / 80
+    startNoclip()
+    local tween = TweenService:Create(
+        hrp,
+        TweenInfo.new(duration, Enum.EasingStyle.Linear),
+        { CFrame = CFrame.new(destination) }
+    )
+    Notify("Tween", "Tweening to 1v1 Arena...", math.ceil(duration))
+    tween:Play()
+    tween.Completed:Connect(function()
+        task.spawn(runACBypassTimer)
+    end)
+end)
 
 -- ── ESP Tab ───────────────────────────────────────────────────────────────────
 local ESPLeft  = Tabs.ESP:AddLeftGroupbox('ESP')
@@ -1857,80 +1940,19 @@ local function setupUIKeybind()
 end
 setupUIKeybind()
 
-MiscRight:AddKeybind('UIToggleKeybind', {
-    Text    = 'UI Toggle Keybind',
-    Default = Enum.KeyCode.RightShift,
-    Callback = function(key)
-        uiToggleKey = key
-        setupUIKeybind()
-    end,
-})
-
--- ── Unload Script ─────────────────────────────────────────────────────────────
-MiscRight:AddButton('Unload Script', function()
-    task.spawn(function()
-        -- Stop all farm loops immediately
-        trashFarmRunning   = false
-        blatantFarmRunning = false
-        autoLaunchRunning  = false
-        masteryRunning     = false
-        isDoingLaunchCycle = false
-        isFreezing         = false
-
-        -- Disconnect every named connection
-        local conns = {
-            perfectConnection, autoEnergyConnection, acBypassTimerConnection,
-            stateKeeperConnection, antiAFKConnection, idledConnection,
-            meteorTimerConnection, meteorTimerAddedConn, meteorTimerRemovedConn,
-            meteorAddedConnection, noclipConnection, uiKeybindConn,
-        }
-        for _, c in ipairs(conns) do pcall(function() if c then c:Disconnect() end end) end
-        perfectConnection       = nil autoEnergyConnection    = nil
-        acBypassTimerConnection = nil stateKeeperConnection   = nil
-        antiAFKConnection       = nil idledConnection         = nil
-        meteorTimerConnection   = nil meteorTimerAddedConn    = nil
-        meteorTimerRemovedConn  = nil meteorAddedConnection   = nil
-        noclipConnection        = nil uiKeybindConn           = nil
-
-        -- Clear all ESP and overlays
-        pcall(stopPlayerESP)
-        pcall(stopMeteorESP)
-        pcall(stopMeteorTimer)
-        pcall(clearTrashESP)
-        pcall(clearGoldTrashESP)
-        pcall(clearDumpsterESP)
-        pcall(clearAllTopBillboards)
-        pcall(teardownTopInspectorListeners)
-        pcall(destroyACBypassTimerGui)
-        pcall(destroyMeteorTimerGui)
-
-        -- Stop movement overrides
-        pcall(stopNoclip)
-        pcall(stopAutoSprint)
-
-        -- Restore character to default state
-        local char = LocalPlayer.Character
-        local h   = char and char:FindFirstChild("Humanoid")
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if h then
-            h.WalkSpeed    = 16
-            h.UseJumpPower = true
-            h.JumpPower    = 50
-        end
-        if hrp then hrp.Anchored = false end
-
-        -- Destroy the entire UI — this is a true unload
-        pcall(function() Library:Destroy() end)
-    end)
+-- ── Config Tab ────────────────────────────────────────────────────────────────
+pcall(function()
+    ThemeManager:SetLibrary(Library)
+    ThemeManager:AttachToTab(Tabs.Config)
 end)
 
--- ── Config Tab — only SaveManager/ThemeManager built-in section ──────────────
-ThemeManager:SetLibrary(Library)
-SaveManager:SetLibrary(Library)
-SaveManager:SetIgnoreIndexes({})
-SaveManager:SetFolder('RequiemTAT')
-SaveManager:BuildConfigSection(Tabs.Config)
-ThemeManager:BuildThemeSection(Tabs.Config)
+local ok2, err2 = pcall(function()
+    SaveManager:SetLibrary(Library)
+    SaveManager:SetFolder('RequiemTAT')
+    SaveManager:SetIgnoreIndexes({ 'UIToggleKeybind', 'PreferredState' })
+    SaveManager:BuildConfigSection(Tabs.Config)
+end)
+if not ok2 then warn("SaveManager error: " .. tostring(err2)) end
 
 -- ── Final notify ──────────────────────────────────────────────────────────────
 if autoLoadConfigName then
