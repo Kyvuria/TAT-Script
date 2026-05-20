@@ -1116,7 +1116,10 @@ local function stopMeteorESP()
 end
 local function onMeteorESP(value)
     toggleStates.MeteorESP=value meteorESP.enabled=value
-    if value then startMeteorESP() startMeteorTimer() Notify("Meteor ESP","Enabled! Timer started.",3)
+    if value then
+        if not connections.meteorTimer then startMeteorTimer() end
+        if not connections.meteorAdded then startMeteorESP() end
+        Notify("Meteor ESP","Enabled! Timer started.",3)
     else stopMeteorESP() stopMeteorTimer() Notify("Meteor ESP","Disabled.",3) end
 end
 toggleCallbacks["MeteorESP"]=onMeteorESP
@@ -2000,6 +2003,8 @@ if not ok2 then warn("SaveManager error: "..tostring(err2)) end
 task.spawn(function()
     task.wait(2)
     if autoLoadConfigName then
+        -- Pause movement enforcer during load to prevent jitter
+        charState.isFreezing=true
         local loadOk, loadErr = pcall(function() SaveManager:LoadConfig(autoLoadConfigName) end)
         if loadOk then
             Notify("Config","Auto loaded: "..autoLoadConfigName, 4)
@@ -2008,10 +2013,21 @@ task.spawn(function()
             Notify("Config","Auto load failed: "..tostring(loadErr):sub(1,40), 5)
         end
         task.wait(0.5)
+        -- Restore correct speeds then re-enable enforcer
+        local char=LocalPlayer.Character
+        local h=char and char:FindFirstChild("Humanoid")
+        if h then
+            h.WalkSpeed=charState.currentWSValue
+            h.UseJumpPower=true
+            h.JumpPower=charState.currentJPValue
+        end
+        charState.isFreezing=false
     end
+    -- Only fire callbacks for flags that aren't already running
+    local MOVEMENT_FLAGS = {AutoTrashFarm=true, AutoTrashFarmBlatant=true, AutoLaunchCycle=true}
     for flag, cb in pairs(toggleCallbacks) do
         local state = toggleStates[flag]
-        if state == true then
+        if state == true and not MOVEMENT_FLAGS[flag] then
             pcall(function() cb(true) end)
         end
     end
