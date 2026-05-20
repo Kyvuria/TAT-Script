@@ -1673,7 +1673,7 @@ local function buildViewerGui(playerName,top)
     makeRow("DEF:",attr("Defense"),Color3.fromRGB(160,160,180),Color3.fromRGB(80,220,80),y) y+=20
     makeRow("STA:",attr("Stamina"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,200,0),y) y+=20
     local typeMap2={Attack="Rush",Stamina="Focused",Defense="Bunker",Balance="Wobble",Standard="Standard"}
-	local styleRaw=top:GetAttribute("Type") or top:GetAttribute("Style") or top:GetAttribute("BeyStyle") or top:GetAttribute("TopStyle") or "?"
+	local styleRaw=top:GetAttribute("LaunchType") or top:GetAttribute("Type") or top:GetAttribute("Style") or "?"
 	local styleDisplay=typeMap2[tostring(styleRaw)] or tostring(styleRaw)
     local styleRowColor
     if styleDisplay:lower():find("rush") or styleDisplay:lower():find("attack") then styleRowColor=Color3.fromRGB(255,60,60)
@@ -1754,14 +1754,6 @@ local viewerDropdown=ESPViewer:AddDropdown('PlayerTopViewerDropdown',{
     Callback=function(value) viewer.selectedPlayer=value end,
 })
 
-ESPViewer:AddButton('Refresh Players',function()
-    viewerDropdown:SetValues(getPlayerList())
-    Notify("Top Viewer","Player list refreshed!",2)
-end)
-
-Players.PlayerAdded:Connect(function() task.wait(1) viewerDropdown:SetValues(getPlayerList()) end)
-Players.PlayerRemoving:Connect(function() task.wait(0.5) viewerDropdown:SetValues(getPlayerList()) end)
-
 ESPViewer:AddButton('View Selected Player Top',function()
     if not viewer.selectedPlayer or viewer.selectedPlayer=="" then Notify("Top Viewer","No player selected!",3) return end
     local top=getTopForPlayer(viewer.selectedPlayer)
@@ -1769,6 +1761,18 @@ ESPViewer:AddButton('View Selected Player Top',function()
     if not top then Notify("Top Viewer",viewer.selectedPlayer.." has no top in arena.",3)
     else Notify("Top Viewer","Showing "..viewer.selectedPlayer.."'s top!",3) end
 end)
+
+ESPViewer:AddButton('Close Top Viewer',function()
+    destroyViewerGui() Notify("Top Viewer","Closed.",2)
+end)
+
+ESPViewer:AddButton('Refresh Players',function()
+    viewerDropdown:SetValues(getPlayerList())
+    Notify("Top Viewer","Player list refreshed!",2)
+end)
+
+Players.PlayerAdded:Connect(function() task.wait(1) viewerDropdown:SetValues(getPlayerList()) end)
+Players.PlayerRemoving:Connect(function() task.wait(0.5) viewerDropdown:SetValues(getPlayerList()) end)
 
 -- Auto Opponent Viewer
 local function startAutoOpponentViewer()
@@ -1898,13 +1902,12 @@ local function stopAutoOpponentViewer()
 end
 
 ESPViewer:AddToggle('AutoOpponentViewer',{
-    Text='Auto Show Opponent Top',
+    Text='Auto Show Opponents Top',
     Default=false,
     Callback=function(value)
         viewer.autoEnabled=value
         if value then
             startAutoOpponentViewer()
-            -- FIX: use correct waiting string
             if not viewer.gui then
                 buildViewerGui("Waiting for beyblade...", nil)
             end
@@ -1916,10 +1919,6 @@ ESPViewer:AddToggle('AutoOpponentViewer',{
         end
     end,
 })
-
-ESPViewer:AddButton('Close Top Viewer',function()
-    destroyViewerGui() Notify("Top Viewer","Closed.",2)
-end)
 
 -- ── Misc Tab ──────────────────────────────────────────────────────────────────
 local MiscLeft  = Tabs.Misc:AddLeftGroupbox('Character')
