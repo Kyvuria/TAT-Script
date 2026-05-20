@@ -838,6 +838,18 @@ local ESPLeft   = Tabs.ESP:AddLeftGroupbox('ESP')
 local ESPRight  = Tabs.ESP:AddRightGroupbox('Top Inspector')
 local ESPViewer = Tabs.ESP:AddRightGroupbox('Top Inspector Viewer')
 
+ESPRight:AddButton('Debug Top Attrs',function()
+    local top = workspace.Tops:GetChildren()[1]
+    if not top then Notify("Debug","No tops found",3) return end
+    local attrs = top:GetAttributes()
+    local result = ""
+    for k,v in pairs(attrs) do
+        result = result..k.."="..tostring(v).." | "
+    end
+    print("[TOP ATTRS] "..result)
+    Notify("Debug","Printed to console!",3)
+end)
+
 -- Player ESP
 local function removePlayerESP(player)
     if playerESP.highlights[player] then playerESP.highlights[player]:Destroy() playerESP.highlights[player]=nil end
@@ -1327,7 +1339,7 @@ local function buildTopBillboard(top)
     local sig2=attrs["SignatureMove_2"] or "?" local sig3=attrs["SignatureMove_3"] or "?"
     local atk=attrs["Attack"] or 0 local def=attrs["Defense"] or 0 local sta=attrs["Stamina"] or 0
     local sc=topInspector.scale
-    local BASE_W=260 local LINE_H=14 local PAD=4 local NUM_LINES=11
+    local BASE_W=260 local LINE_H=14 local PAD=4 local NUM_LINES=12
     local RPM_LABEL_H=20 local RPM_BAR_H=22 local RPM_GAP=6
     local STATE_ROW_H=24
     local totalH=PAD+(LINE_H*NUM_LINES)+RPM_GAP+RPM_LABEL_H+RPM_BAR_H+STATE_ROW_H+PAD+12
@@ -1361,13 +1373,13 @@ local function buildTopBillboard(top)
     makeLine("  "..sig2,Color3.fromRGB(100,200,255))
     makeLine("  "..sig3,Color3.fromRGB(100,200,255))
     makeLine('<font color="#FF4444">ATK:'..atk..'</font>  <font color="#44DD44">DEF:'..def..'</font>  <font color="#FFCC00">STA:'..sta..'</font>',Color3.fromRGB(255,255,255),true)
-    local styleVal=attrs["Style"] or attrs["BeyStyle"] or attrs["TopStyle"] or "?"
+    local styleVal=attrs["Type"] or attrs["Style"] or attrs["BeyStyle"] or attrs["TopStyle"] or "?"
     local styleStr=tostring(styleVal)
     local styleColor
-    if styleStr:lower():find("rush") then styleColor=Color3.fromRGB(255,60,60)
-    elseif styleStr:lower():find("wobble") then styleColor=Color3.fromRGB(180,80,255)
-    elseif styleStr:lower():find("focus") then styleColor=Color3.fromRGB(255,215,0)
-    elseif styleStr:lower():find("bunker") then styleColor=Color3.fromRGB(60,200,80)
+    if styleStr:lower():find("rush") or styleStr:lower():find("attack") then styleColor=Color3.fromRGB(255,60,60)
+    elseif styleStr:lower():find("focus") or styleStr:lower():find("stamina") then styleColor=Color3.fromRGB(255,215,0)
+    elseif styleStr:lower():find("bunker") or styleStr:lower():find("defense") then styleColor=Color3.fromRGB(60,200,80)
+    elseif styleStr:lower():find("wobble") or styleStr:lower():find("balance") then styleColor=Color3.fromRGB(180,80,255)
     else styleColor=Color3.fromRGB(200,200,200) end
     makeLine("Style: "..styleStr, styleColor, false)
     -- bump the last line's textsize up
@@ -1516,7 +1528,7 @@ ESPRight:AddSlider('TopInspectorScale',{
         topInspector.scale=value/100
         if topInspector.enabled then
             local sc=topInspector.scale
-            local BASE_W=260 local LINE_H=14 local PAD=4 local NUM_LINES=11
+            local BASE_W=260 local LINE_H=14 local PAD=4 local NUM_LINES=12
             local RPM_LABEL_H=20 local RPM_BAR_H=22 local RPM_GAP=6 local STATE_ROW_H=24
             local totalH=PAD+(LINE_H*NUM_LINES)+RPM_GAP+RPM_LABEL_H+RPM_BAR_H+STATE_ROW_H+PAD+12
             for _,entry in pairs(topInspector.bbCache) do
@@ -1670,13 +1682,13 @@ local function buildViewerGui(playerName,top)
     makeRow("ATK:",attr("Attack"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,80,80),y) y+=20
     makeRow("DEF:",attr("Defense"),Color3.fromRGB(160,160,180),Color3.fromRGB(80,220,80),y) y+=20
     makeRow("STA:",attr("Stamina"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,200,0),y) y+=20
-    local styleRaw=top:GetAttribute("Style") or top:GetAttribute("BeyStyle") or top:GetAttribute("TopStyle") or "?"
+    local styleRaw=top:GetAttribute("Type") or top:GetAttribute("Style") or top:GetAttribute("BeyStyle") or top:GetAttribute("TopStyle") or "?"
     local styleDisplay=tostring(styleRaw)
     local styleRowColor
-    if styleDisplay:lower():find("rush") then styleRowColor=Color3.fromRGB(255,60,60)
-    elseif styleDisplay:lower():find("wobble") then styleRowColor=Color3.fromRGB(180,80,255)
-    elseif styleDisplay:lower():find("focus") then styleRowColor=Color3.fromRGB(255,215,0)
-    elseif styleDisplay:lower():find("bunker") then styleRowColor=Color3.fromRGB(60,200,80)
+    if styleDisplay:lower():find("rush") or styleDisplay:lower():find("attack") then styleRowColor=Color3.fromRGB(255,60,60)
+    elseif styleDisplay:lower():find("focus") or styleDisplay:lower():find("stamina") then styleRowColor=Color3.fromRGB(255,215,0)
+    elseif styleDisplay:lower():find("bunker") or styleDisplay:lower():find("defense") then styleRowColor=Color3.fromRGB(60,200,80)
+    elseif styleDisplay:lower():find("wobble") or styleDisplay:lower():find("balance") then styleRowColor=Color3.fromRGB(180,80,255)
     else styleRowColor=Color3.fromRGB(200,200,200) end
     makeRow("Style:",styleDisplay,Color3.fromRGB(160,160,180),styleRowColor,y) y+=22
     makeDivider(y) y+=4
