@@ -1331,7 +1331,9 @@ local function buildTopBillboard(top)
     local bb=Instance.new("BillboardGui")
     bb.Name="TopInspectorBB" bb.AlwaysOnTop=true
     bb.Size=UDim2.new(0,math.floor(BASE_W*sc),0,math.floor(totalH*sc))
-    bb.StudsOffset=Vector3.new(0,5,0) bb.MaxDistance=0 bb.Adornee=attachPart bb.Parent=attachPart
+    bb.StudsOffsetWorldSpace=Vector3.new(0,5,0)
+    bb.MaxDistance=150 bb.AlwaysOnTop=true
+    bb.Adornee=attachPart bb.Parent=attachPart
     local bg=Instance.new("Frame")
     bg.BackgroundColor3=Color3.fromRGB(10,10,20) bg.BackgroundTransparency=0.3
     bg.BorderSizePixel=0 bg.Size=UDim2.new(1,0,1,0) bg.Parent=bb
@@ -1649,8 +1651,9 @@ local function buildViewerGui(playerName,top)
     makeRow("DEF:",attr("Defense"),Color3.fromRGB(160,160,180),Color3.fromRGB(80,220,80),y) y+=20
     makeRow("STA:",attr("Stamina"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,200,0),y) y+=22
     makeDivider(y) y+=4
-    local rpmLabel=Instance.new("TextLabel") rpmLabel.BackgroundTransparency=1 rpmLabel.Size=UDim2.new(0.4,0,0,18) rpmLabel.Position=UDim2.new(0,0,0,y) rpmLabel.Font=Enum.Font.GothamBold rpmLabel.TextSize=11 rpmLabel.TextColor3=Color3.fromRGB(160,160,180) rpmLabel.TextXAlignment=Enum.TextXAlignment.Left rpmLabel.Text="RPM:" rpmLabel.Parent=content
-    local rpmValLabel=Instance.new("TextLabel") rpmValLabel.Name="RPMVal" rpmValLabel.BackgroundTransparency=1 rpmValLabel.Size=UDim2.new(0.6,0,0,18) rpmValLabel.Position=UDim2.new(0.4,0,0,y) rpmValLabel.Font=Enum.Font.GothamBold rpmValLabel.TextSize=11 rpmValLabel.TextColor3=Color3.fromRGB(0,200,255) rpmValLabel.TextXAlignment=Enum.TextXAlignment.Left rpmValLabel.Text="..." rpmValLabel.Parent=content
+    local rpmLabel=Instance.new("TextLabel") rpmLabel.BackgroundTransparency=1 rpmLabel.Size=UDim2.new(0.32,0,0,18) rpmLabel.Position=UDim2.new(0,0,0,y) rpmLabel.Font=Enum.Font.GothamBold rpmLabel.TextSize=11 rpmLabel.TextColor3=Color3.fromRGB(160,160,180) rpmLabel.TextXAlignment=Enum.TextXAlignment.Left rpmLabel.Text="RPM:" rpmLabel.Parent=content
+    local rpmValLabel=Instance.new("TextLabel") rpmValLabel.Name="RPMVal" rpmValLabel.BackgroundTransparency=1 rpmValLabel.Size=UDim2.new(0.38,0,0,18) rpmValLabel.Position=UDim2.new(0.32,0,0,y) rpmValLabel.Font=Enum.Font.GothamBold rpmValLabel.TextSize=11 rpmValLabel.TextColor3=Color3.fromRGB(0,200,255) rpmValLabel.TextXAlignment=Enum.TextXAlignment.Left rpmValLabel.Text="..." rpmValLabel.Parent=content
+    local rpmPctLabel=Instance.new("TextLabel") rpmPctLabel.Name="RPMPct" rpmPctLabel.BackgroundTransparency=1 rpmPctLabel.Size=UDim2.new(0.3,0,0,18) rpmPctLabel.Position=UDim2.new(0.7,0,0,y) rpmPctLabel.Font=Enum.Font.GothamBold rpmPctLabel.TextSize=13 rpmPctLabel.TextColor3=Color3.fromRGB(0,200,255) rpmPctLabel.TextXAlignment=Enum.TextXAlignment.Right rpmPctLabel.Text="..." rpmPctLabel.Parent=content
     y+=20
     local rpmBarBG=Instance.new("Frame") rpmBarBG.BackgroundColor3=Color3.fromRGB(30,30,40) rpmBarBG.BorderSizePixel=0 rpmBarBG.Size=UDim2.new(1,0,0,14) rpmBarBG.Position=UDim2.new(0,0,0,y) rpmBarBG.Parent=content
     Instance.new("UICorner",rpmBarBG).CornerRadius=UDim.new(0,3)
@@ -1696,10 +1699,15 @@ local function buildViewerGui(playerName,top)
             else zeroFrames2+=1 currentRPM=zeroFrames2>=ZERO_THRESH2 and 0 or lastKnownRPM2 end
         else zeroFrames2=0 currentRPM=lastKnownRPM2 end
         local maxRPM=(maxHealth>0) and math.floor(maxHealth*20) or 1
-        local pct=math.clamp(currentRPM/math.max(maxRPM,1),0,1)
+        local rawPct=currentRPM/math.max(maxRPM,1)
+        local pct=math.clamp(rawPct,0,1)
         local barColor=getRPMBarColor(pct)
+        local pctInt=math.floor(rawPct*100)
+        local displayPct=rawPct>=1.0 and ("+"..math.min(pctInt,999).."%") or (pctInt.."%")
         rpmValLabel.Text=currentRPM.." / "..maxRPM
         rpmValLabel.TextColor3=isSpinning and barColor or Color3.fromRGB(150,150,150)
+        rpmPctLabel.Text=displayPct
+        rpmPctLabel.TextColor3=isSpinning and barColor or Color3.fromRGB(150,150,150)
         rpmBarFill.BackgroundColor3=isSpinning and barColor or Color3.fromRGB(100,100,100)
         rpmBarFill.Size=UDim2.new(pct,0,1,0)
         local stateMap={Recalling="Recalled"}
@@ -1965,7 +1973,17 @@ local uiToggleKey=Enum.KeyCode.RightShift
 local function setupUIKeybind()
     if connections.uiKeybind then connections.uiKeybind:Disconnect() end
     connections.uiKeybind=UserInputService.InputBegan:Connect(function(input,gp)
-        if gp then return end if input.KeyCode==uiToggleKey then Library:ToggleShown() end
+        if gp then return end
+        if input.KeyCode==uiToggleKey then
+            if Library.Shown ~= nil then
+                Library.Shown = not Library.Shown
+                if Library.GUI then Library.GUI.Enabled = Library.Shown end
+            elseif Library.Toggle then
+                Library:Toggle()
+            elseif Library.Window and Library.Window.GUI then
+                Library.Window.GUI.Enabled = not Library.Window.GUI.Enabled
+            end
+        end
     end)
 end
 setupUIKeybind()
