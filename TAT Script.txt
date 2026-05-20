@@ -838,18 +838,6 @@ local ESPLeft   = Tabs.ESP:AddLeftGroupbox('ESP')
 local ESPRight  = Tabs.ESP:AddRightGroupbox('Top Inspector')
 local ESPViewer = Tabs.ESP:AddRightGroupbox('Top Inspector Viewer')
 
-ESPRight:AddButton('Debug Top Attrs',function()
-    local top = workspace.Tops:GetChildren()[1]
-    if not top then Notify("Debug","No tops found",3) return end
-    local attrs = top:GetAttributes()
-    local result = ""
-    for k,v in pairs(attrs) do
-        result = result..k.."="..tostring(v).." | "
-    end
-    print("[TOP ATTRS] "..result)
-    Notify("Debug","Printed to console!",3)
-end)
-
 -- Player ESP
 local function removePlayerESP(player)
     if playerESP.highlights[player] then playerESP.highlights[player]:Destroy() playerESP.highlights[player]=nil end
@@ -1373,7 +1361,9 @@ local function buildTopBillboard(top)
     makeLine("  "..sig2,Color3.fromRGB(100,200,255))
     makeLine("  "..sig3,Color3.fromRGB(100,200,255))
     makeLine('<font color="#FF4444">ATK:'..atk..'</font>  <font color="#44DD44">DEF:'..def..'</font>  <font color="#FFCC00">STA:'..sta..'</font>',Color3.fromRGB(255,255,255),true)
-    local styleVal=attrs["Type"] or attrs["Style"] or attrs["BeyStyle"] or attrs["TopStyle"] or "?"
+    local typeMap={Attack="Rush",Stamina="Focused",Defense="Bunker",Balance="Wobble",Standard="Standard"}
+	local rawType=top:GetAttribute("LaunchType") or attrs["Type"] or attrs["Style"] or "?"
+	local styleVal=typeMap[rawType] or rawType
     local styleStr=tostring(styleVal)
     local styleColor
     if styleStr:lower():find("rush") or styleStr:lower():find("attack") then styleColor=Color3.fromRGB(255,60,60)
@@ -1682,8 +1672,9 @@ local function buildViewerGui(playerName,top)
     makeRow("ATK:",attr("Attack"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,80,80),y) y+=20
     makeRow("DEF:",attr("Defense"),Color3.fromRGB(160,160,180),Color3.fromRGB(80,220,80),y) y+=20
     makeRow("STA:",attr("Stamina"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,200,0),y) y+=20
-    local styleRaw=top:GetAttribute("Type") or top:GetAttribute("Style") or top:GetAttribute("BeyStyle") or top:GetAttribute("TopStyle") or "?"
-    local styleDisplay=tostring(styleRaw)
+    local typeMap2={Attack="Rush",Stamina="Focused",Defense="Bunker",Balance="Wobble",Standard="Standard"}
+	local styleRaw=top:GetAttribute("Type") or top:GetAttribute("Style") or top:GetAttribute("BeyStyle") or top:GetAttribute("TopStyle") or "?"
+	local styleDisplay=typeMap2[tostring(styleRaw)] or tostring(styleRaw)
     local styleRowColor
     if styleDisplay:lower():find("rush") or styleDisplay:lower():find("attack") then styleRowColor=Color3.fromRGB(255,60,60)
     elseif styleDisplay:lower():find("focus") or styleDisplay:lower():find("stamina") then styleRowColor=Color3.fromRGB(255,215,0)
@@ -1933,6 +1924,16 @@ end)
 -- ── Misc Tab ──────────────────────────────────────────────────────────────────
 local MiscLeft  = Tabs.Misc:AddLeftGroupbox('Character')
 local MiscRight = Tabs.Misc:AddRightGroupbox('Server')
+
+MiscLeft:AddButton('Debug My Top', function()
+    local top = getMyTop()
+    if not top then Notify("Debug", "No top in workspace!", 3) return end
+    print("=== MY TOP INFO ===")
+    for k, v in pairs(top:GetAttributes()) do
+        print(k .. " = " .. tostring(v))
+    end
+    Notify("Debug", "Open console with F9!", 4)
+end)
 
 MiscLeft:AddSlider('WalkSpeed',{Text='Walk Speed',Min=16,Max=45,Default=16,Rounding=0,Suffix=' studs/s',Callback=function(value) charState.currentWSValue=value end})
 MiscLeft:AddSlider('JumpPower',{Text='Jump Power',Min=50,Max=100,Default=50,Rounding=0,Suffix=' power',Callback=function(value)
