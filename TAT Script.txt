@@ -1327,7 +1327,7 @@ local function buildTopBillboard(top)
     local sig2=attrs["SignatureMove_2"] or "?" local sig3=attrs["SignatureMove_3"] or "?"
     local atk=attrs["Attack"] or 0 local def=attrs["Defense"] or 0 local sta=attrs["Stamina"] or 0
     local sc=topInspector.scale
-    local BASE_W=260 local LINE_H=14 local PAD=4 local NUM_LINES=10
+    local BASE_W=260 local LINE_H=14 local PAD=4 local NUM_LINES=11
     local RPM_LABEL_H=20 local RPM_BAR_H=22 local RPM_GAP=6
     local STATE_ROW_H=24
     local totalH=PAD+(LINE_H*NUM_LINES)+RPM_GAP+RPM_LABEL_H+RPM_BAR_H+STATE_ROW_H+PAD+12
@@ -1361,6 +1361,23 @@ local function buildTopBillboard(top)
     makeLine("  "..sig2,Color3.fromRGB(100,200,255))
     makeLine("  "..sig3,Color3.fromRGB(100,200,255))
     makeLine('<font color="#FF4444">ATK:'..atk..'</font>  <font color="#44DD44">DEF:'..def..'</font>  <font color="#FFCC00">STA:'..sta..'</font>',Color3.fromRGB(255,255,255),true)
+    local styleVal=attrs["Style"] or attrs["BeyStyle"] or attrs["TopStyle"] or "?"
+    local styleStr=tostring(styleVal)
+    local styleColor
+    if styleStr:lower():find("rush") then styleColor=Color3.fromRGB(255,60,60)
+    elseif styleStr:lower():find("wobble") then styleColor=Color3.fromRGB(180,80,255)
+    elseif styleStr:lower():find("focus") then styleColor=Color3.fromRGB(255,215,0)
+    elseif styleStr:lower():find("bunker") then styleColor=Color3.fromRGB(60,200,80)
+    else styleColor=Color3.fromRGB(200,200,200) end
+    makeLine("Style: "..styleStr, styleColor, false)
+    -- bump the last line's textsize up
+    do
+        local allLabels = bb:GetChildren()
+        local lastLabel = allLabels[#allLabels]
+        if lastLabel and lastLabel:IsA("TextLabel") then
+            lastLabel.TextSize = math.floor(13*sc)
+        end
+    end
     yPos+=RPM_GAP
     local rpmLabelRow=yPos
     local rpmTitle=Instance.new("TextLabel")
@@ -1499,7 +1516,7 @@ ESPRight:AddSlider('TopInspectorScale',{
         topInspector.scale=value/100
         if topInspector.enabled then
             local sc=topInspector.scale
-            local BASE_W=260 local LINE_H=14 local PAD=4 local NUM_LINES=10
+            local BASE_W=260 local LINE_H=14 local PAD=4 local NUM_LINES=11
             local RPM_LABEL_H=20 local RPM_BAR_H=22 local RPM_GAP=6 local STATE_ROW_H=24
             local totalH=PAD+(LINE_H*NUM_LINES)+RPM_GAP+RPM_LABEL_H+RPM_BAR_H+STATE_ROW_H+PAD+12
             for _,entry in pairs(topInspector.bbCache) do
@@ -1652,7 +1669,16 @@ local function buildViewerGui(playerName,top)
     makeDivider(y) y+=4
     makeRow("ATK:",attr("Attack"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,80,80),y) y+=20
     makeRow("DEF:",attr("Defense"),Color3.fromRGB(160,160,180),Color3.fromRGB(80,220,80),y) y+=20
-    makeRow("STA:",attr("Stamina"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,200,0),y) y+=22
+    makeRow("STA:",attr("Stamina"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,200,0),y) y+=20
+    local styleRaw=top:GetAttribute("Style") or top:GetAttribute("BeyStyle") or top:GetAttribute("TopStyle") or "?"
+    local styleDisplay=tostring(styleRaw)
+    local styleRowColor
+    if styleDisplay:lower():find("rush") then styleRowColor=Color3.fromRGB(255,60,60)
+    elseif styleDisplay:lower():find("wobble") then styleRowColor=Color3.fromRGB(180,80,255)
+    elseif styleDisplay:lower():find("focus") then styleRowColor=Color3.fromRGB(255,215,0)
+    elseif styleDisplay:lower():find("bunker") then styleRowColor=Color3.fromRGB(60,200,80)
+    else styleRowColor=Color3.fromRGB(200,200,200) end
+    makeRow("Style:",styleDisplay,Color3.fromRGB(160,160,180),styleRowColor,y) y+=22
     makeDivider(y) y+=4
     local rpmLabel=Instance.new("TextLabel") rpmLabel.BackgroundTransparency=1 rpmLabel.Size=UDim2.new(0.32,0,0,18) rpmLabel.Position=UDim2.new(0,0,0,y) rpmLabel.Font=Enum.Font.GothamBold rpmLabel.TextSize=11 rpmLabel.TextColor3=Color3.fromRGB(160,160,180) rpmLabel.TextXAlignment=Enum.TextXAlignment.Left rpmLabel.Text="RPM:" rpmLabel.Parent=content
     local rpmValLabel=Instance.new("TextLabel") rpmValLabel.Name="RPMVal" rpmValLabel.BackgroundTransparency=1 rpmValLabel.Size=UDim2.new(0.38,0,0,18) rpmValLabel.Position=UDim2.new(0.32,0,0,y) rpmValLabel.Font=Enum.Font.GothamBold rpmValLabel.TextSize=11 rpmValLabel.TextColor3=Color3.fromRGB(0,200,255) rpmValLabel.TextXAlignment=Enum.TextXAlignment.Left rpmValLabel.Text="..." rpmValLabel.Parent=content
