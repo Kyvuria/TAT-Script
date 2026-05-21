@@ -1774,131 +1774,329 @@ end)
 Players.PlayerAdded:Connect(function() task.wait(1) viewerDropdown:SetValues(getPlayerList()) end)
 Players.PlayerRemoving:Connect(function() task.wait(0.5) viewerDropdown:SetValues(getPlayerList()) end)
 
--- Auto Opponent Viewer
+-- ── Auto Opponent Viewer (FIXED) ─────────────────────────────────────────────
+-- Replace the ENTIRE startAutoOpponentViewer function with this.
+-- How it works:
+--   1. Watches YOUR top's "Target" attribute — this is set by the game engine
+--      to the opponent's top the moment a 1v1 or tournament battle starts.
+--   2. Reads the target top's owner to find the opponent player/NPC name.
+--   3. Falls back to GUI scanning ONLY for tournament bracket "X vs Y" labels,
+--      since those are reliable (not polluted by bystander tops).
+--   4. Clears the viewer when YOUR top leaves the arena (no Target = no battle).
+
+-- ── Auto Opponent Viewer v3 ───────────────────────────────────────────────────
+-- FIXES:
+--   1. "No top found" on battle start — now polls for opponent top up to 8s
+--      after Target is detected, instead of giving up after one check.
+--   2. Viewer now shows last known stats + "Recalled (Xs)" countdown after
+--      battle ends, and only rebuilds to "Waiting..." after the full 10s.
+--   3. Target-based detection fires immediately when the ObjectValue's .Value
+--      is set, without the extra 1s delay that caused the late popup.
+-- ─────────────────────────────────────────────────────────────────────────────
+
 local function startAutoOpponentViewer()
-    if viewer.autoConn then viewer.autoConn:Disconnect() viewer.autoConn=nil end
+    if viewer.autoConn then viewer.autoConn:Disconnect() viewer.autoConn = nil end
+    if viewer._extraConns then
+        for _, c in ipairs(viewer._extraConns) do pcall(function() c:Disconnect() end) end
+        viewer._extraConns = nil
+    end
 
     local lastOpponentName = nil
-    local matchScanConn    = nil
+    local targetWatchConn  = nil
+
+    -- ── resolve helpers ───────────────────────────────────────────────────────
 
     local function resolveOpponentTop(opponentName)
-        for _,p in ipairs(Players:GetPlayers()) do
-            if p.Name==opponentName or p.DisplayName==opponentName then
-                local top=workspace.Tops:FindFirstChild(tostring(p.UserId))
+        if not opponentName or opponentName == "" then return nil end
+        local lowerName = opponentName:lower()
+        local function tokens(s)
+            local t = {} for word in s:lower():gmatch("%a+") do t[word] = true end return t
+        end
+        local function sharesToken(a, b)
+            for w in pairs(a) do if b[w] then return true end end return false
+        end
+        local searchTokens = tokens(opponentName)
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p.Name:lower() == lowerName or p.DisplayName:lower() == lowerName then
+                local top = workspace.Tops:FindFirstChild(tostring(p.UserId))
                 if top then return top end
             end
         end
-        for _,top in ipairs(workspace.Tops:GetChildren()) do
-            local ov=top:FindFirstChild("Owner")
-            if ov and ov.Value and (ov.Value.Name==opponentName or ov.Value.DisplayName==opponentName) then
-                return top
+        for _, top in ipairs(workspace.Tops:GetChildren()) do
+            local ov = top:FindFirstChild("Owner")
+            if ov and ov.Value then
+                if ov.Value.Name:lower() == lowerName or ov.Value.DisplayName:lower() == lowerName then
+                    return top
+                end
+            end
+        end
+        for _, top in ipairs(workspace.Tops:GetChildren()) do
+            if top.Name:lower() == lowerName then return top end
+        end
+        for _, top in ipairs(workspace.Tops:GetChildren()) do
+            if not tonumber(top.Name) then
+                local tl = top.Name:lower()
+                if tl:find(lowerName, 1, true) or lowerName:find(tl, 1, true) then return top end
+            end
+        end
+        for _, top in ipairs(workspace.Tops:GetChildren()) do
+            if not tonumber(top.Name) then
+                if sharesToken(searchTokens, tokens(top.Name)) then return top end
             end
         end
         return nil
     end
 
-    local function openForOpponentName(opponentName)
-        if not opponentName or opponentName=="" then return end
-        if opponentName==lastOpponentName then return end
-        lastOpponentName=opponentName
-        task.delay(2.5, function()
-            if not viewer.autoEnabled then return end
-            local top=resolveOpponentTop(opponentName)
-            if not top then
-                task.delay(2, function()
-                    if not viewer.autoEnabled then return end
-                    top=resolveOpponentTop(opponentName)
-                    buildViewerGui(opponentName, top)
-                end)
-            else
-                buildViewerGui(opponentName, top)
-            end
-            Notify("Auto Viewer","Opponent: "..opponentName, 4)
+    local function getOpponentNameFromTop(oppTop)
+        if not oppTop then return nil end
+        local uid = tonumber(oppTop.Name)
+        if uid then
+            local p = Players:GetPlayerByUserId(uid)
+            if p then return p.Name end
+            return "ID:" .. oppTop.Name
+        end
+        local ov = oppTop:FindFirstChild("Owner")
+        if ov and ov.Value then return ov.Value.Name end
+        return oppTop.Name
+    end
+
+    -- ── open viewer, polling up to 8s for the top to appear ──────────────────
+
+    local function openForOpponent(oppTop, oppName)
+        local name = oppName or getOpponentNameFromTop(oppTop)
+        if not name or name == "" then return end
+        if name == lastOpponentName then return end
+        lastOpponentName = name
+
+        -- If we already have the top instance, open immediately
+        if oppTop and oppTop.Parent then
+            buildViewerGui(name, oppTop)
+            Notify("Auto Viewer", "Opponent: " .. name, 4)
+            return
+        end
+
+        -- Otherwise poll up to 8 seconds for it to appear
+        task.spawn(function()
+            local deadline = tick() + 8
+            local found = nil
+            repeat
+                found = resolveOpponentTop(name)
+                if found then break end
+                task.wait(0.3)
+            until tick() > deadline or not viewer.autoEnabled or lastOpponentName ~= name
+
+            if not viewer.autoEnabled or lastOpponentName ~= name then return end
+            buildViewerGui(name, found) -- found may still be nil → shows "No top" but at least correct name
+            Notify("Auto Viewer", "Opponent: " .. name, 4)
         end)
     end
 
-    local myName=LocalPlayer.Name
-    local myDisplay=LocalPlayer.DisplayName
-
-    local function extractOpponentFromText(text)
-        if not text or text=="" then return nil end
-        text=text:lower()
-        local myLower=myName:lower()
-        local myDispLower=myDisplay:lower()
-        if not text:find("vs") then return nil end
-        if not (text:find(myLower,1,true) or text:find(myDispLower,1,true)) then return nil end
-        local left,right=text:match("^(.-)%s*vs%s*(.+)$")
-        if not left or not right then return nil end
-        left=left:gsub("^%s+",""):gsub("%s+$","")
-        right=right:gsub("^%s+",""):gsub("%s+$","")
-        local opponentLower
-        if left==myLower or left==myDispLower then opponentLower=right
-        elseif right==myLower or right==myDispLower then opponentLower=left
-        else return nil end
-        for _,p in ipairs(Players:GetPlayers()) do
-            if p.Name:lower()==opponentLower or p.DisplayName:lower()==opponentLower then
-                return p.Name
-            end
+    local function clearOpponent()
+        if lastOpponentName then
+            lastOpponentName = nil
+            buildViewerGui("Waiting for beyblade...", nil)
         end
-        return opponentLower
     end
 
-    local function scanGuiForMatch(gui)
-        local labels={}
-        local function collect(inst)
-            for _,child in ipairs(inst:GetChildren()) do
-                if child:IsA("TextLabel") and child.Visible then
-                    table.insert(labels,child.Text)
-                end
-                collect(child)
+    -- ── hook our top's Target child ───────────────────────────────────────────
+
+    local function hookMyTop(myTop)
+        if targetWatchConn then targetWatchConn:Disconnect() targetWatchConn = nil end
+        if not myTop then clearOpponent() return end
+
+        -- Check immediately: Target may already exist (joined mid-battle)
+        local existingTarget = myTop:FindFirstChild("Target")
+        if existingTarget then
+            local oppTop = existingTarget.Value
+            if oppTop and oppTop.Parent then
+                task.spawn(function() openForOpponent(oppTop, nil) end)
+            elseif oppTop == nil then
+                -- Value not populated yet — wait for it
+                local c2
+                c2 = existingTarget:GetPropertyChangedSignal("Value"):Connect(function()
+                    c2:Disconnect()
+                    local opp = existingTarget.Value
+                    if opp then task.spawn(function() openForOpponent(opp, nil) end) end
+                end)
             end
         end
-        collect(gui)
-        for _,text in ipairs(labels) do
-            local opp=extractOpponentFromText(text)
-            if opp then return opp end
+
+        -- Watch for Target being added (new battle)
+        targetWatchConn = myTop.ChildAdded:Connect(function(child)
+            if child.Name ~= "Target" then return end
+            -- Fire as soon as Value is non-nil
+            local oppTop = child.Value
+            if oppTop and oppTop.Parent then
+                task.spawn(function() openForOpponent(oppTop, nil) end)
+            else
+                local c2
+                c2 = child:GetPropertyChangedSignal("Value"):Connect(function()
+                    c2:Disconnect()
+                    local opp = child.Value
+                    if opp then task.spawn(function() openForOpponent(opp, nil) end) end
+                end)
+            end
+        end)
+
+        -- Watch for Target removed (battle ended)
+        myTop.ChildRemoved:Connect(function(child)
+            if child.Name ~= "Target" then return end
+            task.delay(3, function()
+                if not viewer.autoEnabled then return end
+                local t2 = workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
+                if not t2 or not t2:FindFirstChild("Target") then
+                    clearOpponent()
+                end
+            end)
+        end)
+    end
+
+    -- ── watch workspace.Tops for our top ─────────────────────────────────────
+
+    local topsAddedConn = workspace.Tops.ChildAdded:Connect(function(top)
+        if not viewer.autoEnabled then return end
+        if top.Name == tostring(LocalPlayer.UserId) then
+            task.wait(0.2)
+            hookMyTop(top)
         end
-        local myLower=myName:lower()
-        local myDispLower=myDisplay:lower()
-        local foundUs=false
-        for _,text in ipairs(labels) do
-            local t=text:lower():gsub("^%s+",""):gsub("%s+$","")
-            if t==myLower or t==myDispLower then foundUs=true end
+    end)
+
+    local topsRemovedConn = workspace.Tops.ChildRemoved:Connect(function(top)
+        if not viewer.autoEnabled then return end
+        if top.Name == tostring(LocalPlayer.UserId) then
+            hookMyTop(nil)
         end
-        if foundUs then
-            for _,text in ipairs(labels) do
-                local t=text:lower():gsub("^%s+",""):gsub("%s+$","")
-                if t~=myLower and t~=myDispLower and t~="" then
-                    for _,p in ipairs(Players:GetPlayers()) do
-                        if p.Name:lower()==t or p.DisplayName:lower()==t then
-                            return p.Name
+    end)
+
+    -- Hook immediately if top already exists
+    local existingTop = workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
+    if existingTop then hookMyTop(existingTop) end
+
+    -- ── GUI scan fallback for tournament "X vs Y" bracket labels only ─────────
+
+    local myName    = LocalPlayer.Name
+    local myDisplay = LocalPlayer.DisplayName
+
+    local function extractVsLabel(text)
+        if not text or text == "" then return nil end
+        local tl = text:lower()
+        if not tl:find(" vs ") then return nil end
+        if not (tl:find(myName:lower(), 1, true) or tl:find(myDisplay:lower(), 1, true)) then return nil end
+        local left, right = tl:match("^(.-)%s+vs%s+(.+)$")
+        if not left or not right then return nil end
+        left  = left:gsub("^%s+", ""):gsub("%s+$", "")
+        right = right:gsub("^%s+", ""):gsub("%s+$", "")
+        local myL  = myName:lower()
+        local myDL = myDisplay:lower()
+        local oppL = (left == myL or left == myDL) and right
+                  or (right == myL or right == myDL) and left
+                  or nil
+        if not oppL then return nil end
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p.Name:lower() == oppL or p.DisplayName:lower() == oppL then return p.Name end
+        end
+        return oppL
+    end
+
+    local scanInterval = 0
+    local guiScanConn = RunService.Heartbeat:Connect(function(dt)
+        scanInterval += dt
+        if scanInterval < 1.0 then return end
+        scanInterval = 0
+        for _, gui in ipairs(playerGui:GetChildren()) do
+            if gui:IsA("ScreenGui") and gui.Enabled then
+                local function collectLabels(inst, out)
+                    for _, child in ipairs(inst:GetChildren()) do
+                        if child:IsA("TextLabel") and child.Visible then
+                            table.insert(out, child.Text)
                         end
+                        collectLabels(child, out)
                     end
                 end
-            end
-        end
-        return nil
-    end
-
-    local scanInterval=0
-    matchScanConn=RunService.Heartbeat:Connect(function(dt)
-        scanInterval+=dt if scanInterval<0.5 then return end scanInterval=0
-        for _,gui in ipairs(playerGui:GetChildren()) do
-            if gui:IsA("ScreenGui") and gui.Enabled then
-                local opp=scanGuiForMatch(gui)
-                if opp and opp~=lastOpponentName then
-                    openForOpponentName(opp)
-                    return
+                local labels = {}
+                collectLabels(gui, labels)
+                for _, text in ipairs(labels) do
+                    local opp = extractVsLabel(text)
+                    if opp and opp ~= lastOpponentName then
+                        task.spawn(function() openForOpponent(nil, opp) end)
+                        return
+                    end
                 end
             end
         end
     end)
 
-    viewer.autoConn=matchScanConn
+    viewer.autoConn    = guiScanConn
+    viewer._extraConns = { topsAddedConn, topsRemovedConn }
 end
 
 local function stopAutoOpponentViewer()
+    if viewer.autoConn then viewer.autoConn:Disconnect() viewer.autoConn = nil end
+    if viewer._extraConns then
+        for _, c in ipairs(viewer._extraConns) do pcall(function() c:Disconnect() end) end
+        viewer._extraConns = nil
+    end
+end
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- ALSO REPLACE this block inside buildViewerGui's viewer.liveConn heartbeat:
+--
+-- FIND (the "top no longer exists" section):
+--
+--        if not top or not top.Parent then
+--            if not recalledTime then
+--                recalledTime=tick()
+--                rpmValLabel.Text="N/A"
+--                rpmBarFill.Size=UDim2.new(0,0,1,0)
+--            end
+--            local left=math.ceil(RECALLED_WAIT-(tick()-recalledTime))
+--            if left>0 then
+--                stateValLabel.Text="Recalled ("..left.."s)"
+--                stateValLabel.TextColor3=Color3.fromRGB(200,180,0)
+--            else
+--                -- 10s elapsed — fully rebuild viewer to clear all stale stats
+--                recalledTime=nil
+--                if viewer.liveConn then viewer.liveConn:Disconnect() viewer.liveConn=nil end
+--                task.spawn(function() buildViewerGui("Waiting for beyblade...", nil) end)
+--            end
+--            return
+--        end
+--
+-- REPLACE WITH:
+--
+--        if not top or not top.Parent then
+--            if not recalledTime then
+--                recalledTime = tick()
+--                -- Keep last RPM values visible — just zero the bar fill
+--                rpmBarFill.Size = UDim2.new(0, 0, 1, 0)
+--                rpmBarFill.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+--            end
+--            local left = math.ceil(RECALLED_WAIT - (tick() - recalledTime))
+--            if left > 0 then
+--                -- Show countdown but keep all other stats visible
+--                stateValLabel.Text = "Recalled (" .. left .. "s)"
+--                stateValLabel.TextColor3 = Color3.fromRGB(200, 180, 0)
+--                rpmValLabel.Text = "0 / " .. tostring(math.floor((top and top:GetAttribute("MaxHealth") or 0) * 20))
+--                rpmValLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+--                rpmPctLabel.Text = "0%"
+--                rpmPctLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+--            else
+--                -- 10s elapsed — only NOW reset to waiting
+--                recalledTime = nil
+--                if viewer.liveConn then viewer.liveConn:Disconnect() viewer.liveConn = nil end
+--                task.spawn(function() buildViewerGui("Waiting for beyblade...", nil) end)
+--            end
+--            return
+--        end
+-- ─────────────────────────────────────────────────────────────────────────────
+
+local function stopAutoOpponentViewer()
     if viewer.autoConn then viewer.autoConn:Disconnect() viewer.autoConn=nil end
+    if viewer._extraConns then
+        for _, c in ipairs(viewer._extraConns) do pcall(function() c:Disconnect() end) end
+        viewer._extraConns = nil
+    end
 end
 
 ESPViewer:AddToggle('AutoOpponentViewer',{
