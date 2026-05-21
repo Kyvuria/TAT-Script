@@ -1961,21 +1961,6 @@ ESPViewer:AddToggle('AutoOpponentViewer',{
 local MiscLeft  = Tabs.Misc:AddLeftGroupbox('Character')
 local MiscRight = Tabs.Misc:AddRightGroupbox('Server')
 
-task.wait(3)
-
--- DEBUG: print all files found
-pcall(function()
-        local files = listfiles("RequiemTAT")
-        for _, f in ipairs(files) do
-            warn("[Requiem] Trying exact path: " .. tostring(f))
-            if f:lower():find("settings") then
-                local ok, data = pcall(readfile, f)
-                warn("[Requiem] Read result: ok=" .. tostring(ok) .. " len=" .. tostring(ok and #data or tostring(data)))
-                if ok and data and #data > 5 then rawData = data end
-            end
-        end
-    end)
-
 MiscLeft:AddButton('Debug My Top',function()
     local top=getMyTop()
     if not top then Notify("Debug","No top in workspace!",3) return end
