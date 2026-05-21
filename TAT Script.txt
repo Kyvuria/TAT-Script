@@ -164,7 +164,7 @@ local function stopNoclip()
     task.wait()
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if hrp then hrp.CanCollide = false end -- HRP is always false in normal Roblox characters
+    if hrp then hrp.CanCollide = false end
 end
 
 -- ── Sprint / wait helpers ─────────────────────────────────────────────────────
@@ -629,18 +629,15 @@ local function runACBypassTimer()
 end
 
 -- ── Auto Re-Engage ────────────────────────────────────────────────────────────
--- FIX: Slower key presses + second attempt 2s later for reliability
 local function doReEngage()
     if reEngageState.cooldown then return end
     reEngageState.cooldown=true
     task.spawn(function()
         task.wait(1)
-        -- First attempt
         VirtualInputManager:SendKeyEvent(true,Enum.KeyCode.E,false,game) task.wait(0.15)
         VirtualInputManager:SendKeyEvent(false,Enum.KeyCode.E,false,game) task.wait(0.3)
         VirtualInputManager:SendKeyEvent(true,Enum.KeyCode.E,false,game) task.wait(0.15)
         VirtualInputManager:SendKeyEvent(false,Enum.KeyCode.E,false,game)
-        -- Second attempt 2s later for reliability
         task.wait(2)
         if toggleStates.AutoReEngage then
             VirtualInputManager:SendKeyEvent(true,Enum.KeyCode.E,false,game) task.wait(0.15)
@@ -732,9 +729,7 @@ local function onAutoPerfectLaunch(value)
             local inZone=math.abs(tc-gc)<goal.AbsoluteSize.X/2*0.6
             local movingLeft=lastTrackerX and (tc<lastTrackerX)
             lastTrackerX=tc
-            if inZone and not wasInZone then
-                passCount+=1
-            end
+            if inZone and not wasInZone then passCount+=1 end
             wasInZone=inZone
             if inZone and passCount>=2 and movingLeft then
                 passCount=0 clickState.last=now doClick()
@@ -787,7 +782,9 @@ local function onAutoEatBurger(value)
             local now=tick() if now-farmState.lastBuy<farmState.BUYCOOLDOWN then return end
             if isOutOfEnergy() and not farmState.isBurgerBuying then farmState.lastBuy=now task.spawn(function() doBurgerRun(false) end) end
         end)
-    else if connections.autoEnergy then connections.autoEnergy:Disconnect() connections.autoEnergy=nil end end
+    else
+        if connections.autoEnergy then connections.autoEnergy:Disconnect() connections.autoEnergy=nil end
+    end
 end
 toggleCallbacks["AutoBuyBurger"]=onAutoEatBurger
 MainLeft:AddToggle('AutoBuyBurger',{Text='Auto Eat Burger (AFK)',Default=startFlags.AutoBuyBurger,Callback=onAutoEatBurger})
@@ -1298,8 +1295,6 @@ end
 
 local function buildTopBillboard(top)
     if topInspector.buildLock[top] then return end topInspector.buildLock[top]=true
-    -- (TaggedNPC filter removed: NPC tops outside tourney now show builds)
-    -- Wait for Crown+Body to exist before building, then retry
     local crown=top:FindFirstChild("Crown")
     local body=top:FindFirstChild("Body")
     if not crown or not body then
@@ -1328,8 +1323,7 @@ local function buildTopBillboard(top)
     local atk=attrs["Attack"] or 0 local def=attrs["Defense"] or 0 local sta=attrs["Stamina"] or 0
     local sc=topInspector.scale
     local BASE_W=260 local LINE_H=14 local PAD=4 local NUM_LINES=12
-    local RPM_LABEL_H=20 local RPM_BAR_H=22 local RPM_GAP=6
-    local STATE_ROW_H=24
+    local RPM_LABEL_H=20 local RPM_BAR_H=22 local RPM_GAP=6 local STATE_ROW_H=24
     local totalH=PAD+(LINE_H*NUM_LINES)+RPM_GAP+RPM_LABEL_H+RPM_BAR_H+STATE_ROW_H+PAD+12
     local bb=Instance.new("BillboardGui")
     bb.Name="TopInspectorBB" bb.AlwaysOnTop=true
@@ -1362,8 +1356,8 @@ local function buildTopBillboard(top)
     makeLine("  "..sig3,Color3.fromRGB(100,200,255))
     makeLine('<font color="#FF4444">ATK:'..atk..'</font>  <font color="#44DD44">DEF:'..def..'</font>  <font color="#FFCC00">STA:'..sta..'</font>',Color3.fromRGB(255,255,255),true)
     local typeMap={Attack="Rush",Stamina="Focused",Defense="Bunker",Balance="Wobble",Standard="Standard"}
-	local rawType=top:GetAttribute("LaunchType") or attrs["Type"] or attrs["Style"] or "?"
-	local styleVal=typeMap[rawType] or rawType
+    local rawType=top:GetAttribute("LaunchType") or attrs["Type"] or attrs["Style"] or "?"
+    local styleVal=typeMap[rawType] or rawType
     local styleStr=tostring(styleVal)
     local styleColor
     if styleStr:lower():find("rush") or styleStr:lower():find("attack") then styleColor=Color3.fromRGB(255,60,60)
@@ -1372,13 +1366,10 @@ local function buildTopBillboard(top)
     elseif styleStr:lower():find("wobble") or styleStr:lower():find("balance") then styleColor=Color3.fromRGB(180,80,255)
     else styleColor=Color3.fromRGB(200,200,200) end
     makeLine("Style: "..styleStr, styleColor, false)
-    -- bump the last line's textsize up
     do
         local allLabels = bb:GetChildren()
         local lastLabel = allLabels[#allLabels]
-        if lastLabel and lastLabel:IsA("TextLabel") then
-            lastLabel.TextSize = math.floor(13*sc)
-        end
+        if lastLabel and lastLabel:IsA("TextLabel") then lastLabel.TextSize = math.floor(13*sc) end
     end
     yPos+=RPM_GAP
     local rpmLabelRow=yPos
@@ -1497,17 +1488,14 @@ end
 local function refreshTopInspector()
     clearAllTopBillboards() if not topInspector.enabled then return end
     setupTopInspectorListeners()
-    for _,top in ipairs(workspace.Tops:GetChildren()) do
-        task.spawn(buildTopBillboard,top)
-    end
+    for _,top in ipairs(workspace.Tops:GetChildren()) do task.spawn(buildTopBillboard,top) end
 end
 local function onTopInspector(value)
     topInspector.enabled=value
     if value then
         setupTopInspectorListeners()
-        for _,top in ipairs(workspace.Tops:GetChildren()) do
-            task.spawn(buildTopBillboard,top)
-        end Notify("Top Inspector","Enabled!",3)
+        for _,top in ipairs(workspace.Tops:GetChildren()) do task.spawn(buildTopBillboard,top) end
+        Notify("Top Inspector","Enabled!",3)
     else teardownTopInspectorListeners() clearAllTopBillboards() Notify("Top Inspector","Disabled.",3) end
 end
 ESPRight:AddToggle('TopInspector',{Text='Top Inspector',Default=false,Callback=onTopInspector})
@@ -1566,7 +1554,7 @@ ESPRight:AddSlider('TopInspectorScale',{
     end,
 })
 
--- ── Top Inspector Viewer (SEPARATE GROUPBOX) ──────────────────────────────────
+-- ── Top Inspector Viewer ──────────────────────────────────────────────────────
 local function getPlayerList()
     local names={} for _,p in ipairs(Players:GetPlayers()) do table.insert(names,p.Name) end table.sort(names) return names
 end
@@ -1624,10 +1612,10 @@ local function buildViewerGui(playerName,top)
     titleLabel.TextXAlignment=Enum.TextXAlignment.Left titleLabel.TextStrokeTransparency=0.5
     titleLabel.TextStrokeColor3=Color3.fromRGB(0,0,0)
     local function toTitleCase(s)
-    return (s:gsub("(%a)([%w_']*)", function(a,b) return a:upper()..b:lower() end))
-end
-local displayName = (playerName == "Waiting for beyblade..." or playerName == "Waiting for match...") and playerName or toTitleCase(playerName)
-local titleSuffix=(playerName=="Waiting for beyblade...") and "" or "'s Top"
+        return (s:gsub("(%a)([%w_']*)", function(a,b) return a:upper()..b:lower() end))
+    end
+    local displayName=(playerName=="Waiting for beyblade..." or playerName=="Waiting for match...") and playerName or toTitleCase(playerName)
+    local titleSuffix=(playerName=="Waiting for beyblade...") and "" or "'s Top"
     titleLabel.Text="🔍 "..(displayName or "?")..titleSuffix titleLabel.Parent=titleBg
     local closeBtn=Instance.new("TextButton")
     closeBtn.BackgroundColor3=Color3.fromRGB(180,40,40) closeBtn.BackgroundTransparency=0.2
@@ -1681,8 +1669,8 @@ local titleSuffix=(playerName=="Waiting for beyblade...") and "" or "'s Top"
     makeRow("DEF:",attr("Defense"),Color3.fromRGB(160,160,180),Color3.fromRGB(80,220,80),y) y+=20
     makeRow("STA:",attr("Stamina"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,200,0),y) y+=20
     local typeMap2={Attack="Rush",Stamina="Focused",Defense="Bunker",Balance="Wobble",Standard="Standard"}
-	local styleRaw=top:GetAttribute("LaunchType") or top:GetAttribute("Type") or top:GetAttribute("Style") or "?"
-	local styleDisplay=typeMap2[tostring(styleRaw)] or tostring(styleRaw)
+    local styleRaw=top:GetAttribute("LaunchType") or top:GetAttribute("Type") or top:GetAttribute("Style") or "?"
+    local styleDisplay=typeMap2[tostring(styleRaw)] or tostring(styleRaw)
     local styleRowColor
     if styleDisplay:lower():find("rush") or styleDisplay:lower():find("attack") then styleRowColor=Color3.fromRGB(255,60,60)
     elseif styleDisplay:lower():find("focus") or styleDisplay:lower():find("stamina") then styleRowColor=Color3.fromRGB(255,215,0)
@@ -1705,42 +1693,36 @@ local titleSuffix=(playerName=="Waiting for beyblade...") and "" or "'s Top"
     local stateKeyLabel=Instance.new("TextLabel") stateKeyLabel.BackgroundTransparency=1 stateKeyLabel.Size=UDim2.new(0.42,0,1,0) stateKeyLabel.Font=Enum.Font.GothamBold stateKeyLabel.TextSize=11 stateKeyLabel.TextColor3=Color3.fromRGB(160,160,180) stateKeyLabel.TextXAlignment=Enum.TextXAlignment.Left stateKeyLabel.TextStrokeTransparency=0.5 stateKeyLabel.TextStrokeColor3=Color3.fromRGB(0,0,0) stateKeyLabel.Text="State:" stateKeyLabel.Parent=stateRow2
     local stateValLabel=Instance.new("TextLabel") stateValLabel.BackgroundTransparency=1 stateValLabel.Size=UDim2.new(0.58,0,1,0) stateValLabel.Position=UDim2.new(0.42,0,0,0) stateValLabel.Font=Enum.Font.GothamBold stateValLabel.TextSize=11 stateValLabel.TextColor3=Color3.fromRGB(200,200,200) stateValLabel.TextXAlignment=Enum.TextXAlignment.Left stateValLabel.TextStrokeTransparency=0.5 stateValLabel.TextStrokeColor3=Color3.fromRGB(0,0,0) stateValLabel.TextWrapped=true stateValLabel.Text="..." stateValLabel.Parent=stateRow2
     local lastKnownRPM2=0 local zeroFrames2=0 local ZERO_THRESH2=8 local updateInterval=0
-    -- Countdown state for when top leaves arena (recalled/picked up)
     local recalledTime=nil local RECALLED_WAIT=10
     viewer.liveConn=RunService.Heartbeat:Connect(function(dt)
         updateInterval+=dt if updateInterval<0.12 then return end updateInterval=0
-        -- Top no longer exists in workspace at all
         if not top or not top.Parent then
-            -- If this was an NPC/bot top (tourney bot), clear immediately instead of countdown
-            local ownerVal = top and top:FindFirstChild("Owner")
-            local ownerName = ownerVal and ownerVal.Value and ownerVal.Value.Name
-            local isNPC = ownerName and not Players:FindFirstChild(ownerName)
+            local ownerVal=top and top:FindFirstChild("Owner")
+            local ownerName=ownerVal and ownerVal.Value and ownerVal.Value.Name
+            local isNPC=ownerName and not Players:FindFirstChild(ownerName)
             if isNPC then
                 if viewer.liveConn then viewer.liveConn:Disconnect() viewer.liveConn=nil end
-                task.spawn(function() buildViewerGui("Waiting for beyblade...", nil) end)
+                task.spawn(function() buildViewerGui("Waiting for beyblade...",nil) end)
                 return
             end
             if not recalledTime then
-                recalledTime = tick()
-                rpmBarFill.Size = UDim2.new(0, 0, 1, 0)
-                rpmBarFill.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+                recalledTime=tick()
+                rpmBarFill.Size=UDim2.new(0,0,1,0)
+                rpmBarFill.BackgroundColor3=Color3.fromRGB(100,100,100)
             end
-            local left = math.ceil(RECALLED_WAIT - (tick() - recalledTime))
-            if left > 0 then
-                stateValLabel.Text = "Recalled (" .. left .. "s)"
-                stateValLabel.TextColor3 = Color3.fromRGB(200, 180, 0)
-                rpmValLabel.Text = "0 / 0"
-                rpmValLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-                rpmPctLabel.Text = "0%"
-                rpmPctLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+            local left=math.ceil(RECALLED_WAIT-(tick()-recalledTime))
+            if left>0 then
+                stateValLabel.Text="Recalled ("..left.."s)"
+                stateValLabel.TextColor3=Color3.fromRGB(200,180,0)
+                rpmValLabel.Text="0 / 0" rpmValLabel.TextColor3=Color3.fromRGB(150,150,150)
+                rpmPctLabel.Text="0%" rpmPctLabel.TextColor3=Color3.fromRGB(150,150,150)
             else
-                recalledTime = nil
+                recalledTime=nil
                 if viewer.liveConn then viewer.liveConn:Disconnect() viewer.liveConn=nil end
-                task.spawn(function() buildViewerGui("Waiting for beyblade...", nil) end)
+                task.spawn(function() buildViewerGui("Waiting for beyblade...",nil) end)
             end
             return
         end
-        -- Top is back in play — clear recalled timer
         recalledTime=nil
         local state=tostring(top:GetAttribute("State") or "") local isSpinning=LIVE_STATES[state]==true
         local health=top:GetAttribute("Health") or 0 local maxHealth=top:GetAttribute("MaxHealth") or 0
@@ -1758,8 +1740,7 @@ local titleSuffix=(playerName=="Waiting for beyblade...") and "" or "'s Top"
         local displayPct=rawPct>=1.0 and ("+"..math.min(pctInt,999).."%") or (pctInt.."%")
         rpmValLabel.Text=currentRPM.." / "..maxRPM
         rpmValLabel.TextColor3=isSpinning and barColor or Color3.fromRGB(150,150,150)
-        rpmPctLabel.Text=displayPct
-        rpmPctLabel.TextColor3=isSpinning and barColor or Color3.fromRGB(150,150,150)
+        rpmPctLabel.Text=displayPct rpmPctLabel.TextColor3=isSpinning and barColor or Color3.fromRGB(150,150,150)
         rpmBarFill.BackgroundColor3=isSpinning and barColor or Color3.fromRGB(100,100,100)
         rpmBarFill.Size=UDim2.new(pct,0,1,0)
         local stateMap={Recalling="Recalled"}
@@ -1768,12 +1749,10 @@ local titleSuffix=(playerName=="Waiting for beyblade...") and "" or "'s Top"
     end)
 end
 
--- CHANGED: all viewer controls now live in ESPViewer groupbox
 local viewerDropdown=ESPViewer:AddDropdown('PlayerTopViewerDropdown',{
     Text='Select Player', Values=getPlayerList(), Default=1,
     Callback=function(value) viewer.selectedPlayer=value end,
 })
-
 ESPViewer:AddButton('View Selected Player Top',function()
     if not viewer.selectedPlayer or viewer.selectedPlayer=="" then Notify("Top Viewer","No player selected!",3) return end
     local top=getTopForPlayer(viewer.selectedPlayer)
@@ -1781,346 +1760,199 @@ ESPViewer:AddButton('View Selected Player Top',function()
     if not top then Notify("Top Viewer",viewer.selectedPlayer.." has no top in arena.",3)
     else Notify("Top Viewer","Showing "..viewer.selectedPlayer.."'s top!",3) end
 end)
-
-ESPViewer:AddButton('Close Top Viewer',function()
-    destroyViewerGui() Notify("Top Viewer","Closed.",2)
-end)
-
+ESPViewer:AddButton('Close Top Viewer',function() destroyViewerGui() Notify("Top Viewer","Closed.",2) end)
 ESPViewer:AddButton('Refresh Players',function()
-    viewerDropdown:SetValues(getPlayerList())
-    Notify("Top Viewer","Player list refreshed!",2)
+    viewerDropdown:SetValues(getPlayerList()) Notify("Top Viewer","Player list refreshed!",2)
 end)
-
 Players.PlayerAdded:Connect(function() task.wait(1) viewerDropdown:SetValues(getPlayerList()) end)
 Players.PlayerRemoving:Connect(function() task.wait(0.5) viewerDropdown:SetValues(getPlayerList()) end)
 
--- ── Auto Opponent Viewer (FIXED) ─────────────────────────────────────────────
--- Replace the ENTIRE startAutoOpponentViewer function with this.
--- How it works:
---   1. Watches YOUR top's "Target" attribute — this is set by the game engine
---      to the opponent's top the moment a 1v1 or tournament battle starts.
---   2. Reads the target top's owner to find the opponent player/NPC name.
---   3. Falls back to GUI scanning ONLY for tournament bracket "X vs Y" labels,
---      since those are reliable (not polluted by bystander tops).
---   4. Clears the viewer when YOUR top leaves the arena (no Target = no battle).
-
--- ── Auto Opponent Viewer v3 ───────────────────────────────────────────────────
--- FIXES:
---   1. "No top found" on battle start — now polls for opponent top up to 8s
---      after Target is detected, instead of giving up after one check.
---   2. Viewer now shows last known stats + "Recalled (Xs)" countdown after
---      battle ends, and only rebuilds to "Waiting..." after the full 10s.
---   3. Target-based detection fires immediately when the ObjectValue's .Value
---      is set, without the extra 1s delay that caused the late popup.
--- ─────────────────────────────────────────────────────────────────────────────
-
+-- ── Auto Opponent Viewer ──────────────────────────────────────────────────────
 local function startAutoOpponentViewer()
-    if viewer.autoConn then viewer.autoConn:Disconnect() viewer.autoConn = nil end
+    if viewer.autoConn then viewer.autoConn:Disconnect() viewer.autoConn=nil end
     if viewer._extraConns then
-        for _, c in ipairs(viewer._extraConns) do pcall(function() c:Disconnect() end) end
-        viewer._extraConns = nil
+        for _,c in ipairs(viewer._extraConns) do pcall(function() c:Disconnect() end) end
+        viewer._extraConns=nil
     end
-
-    local lastOpponentName = nil
-    local targetWatchConn  = nil
-
-    -- ── resolve helpers ───────────────────────────────────────────────────────
-
+    local lastOpponentName=nil
+    local targetWatchConn=nil
     local function resolveOpponentTop(opponentName)
-        if not opponentName or opponentName == "" then return nil end
-        local lowerName = opponentName:lower()
-        local function tokens(s)
-            local t = {} for word in s:lower():gmatch("%a+") do t[word] = true end return t
-        end
-        local function sharesToken(a, b)
-            for w in pairs(a) do if b[w] then return true end end return false
-        end
-        local searchTokens = tokens(opponentName)
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p.Name:lower() == lowerName or p.DisplayName:lower() == lowerName then
-                local top = workspace.Tops:FindFirstChild(tostring(p.UserId))
+        if not opponentName or opponentName=="" then return nil end
+        local lowerName=opponentName:lower()
+        local function tokens(s) local t={} for word in s:lower():gmatch("%a+") do t[word]=true end return t end
+        local function sharesToken(a,b) for w in pairs(a) do if b[w] then return true end end return false end
+        local searchTokens=tokens(opponentName)
+        for _,p in ipairs(Players:GetPlayers()) do
+            if p.Name:lower()==lowerName or p.DisplayName:lower()==lowerName then
+                local top=workspace.Tops:FindFirstChild(tostring(p.UserId))
                 if top then return top end
             end
         end
-        for _, top in ipairs(workspace.Tops:GetChildren()) do
-            local ov = top:FindFirstChild("Owner")
+        for _,top in ipairs(workspace.Tops:GetChildren()) do
+            local ov=top:FindFirstChild("Owner")
             if ov and ov.Value then
-                if ov.Value.Name:lower() == lowerName or ov.Value.DisplayName:lower() == lowerName then
-                    return top
-                end
+                if ov.Value.Name:lower()==lowerName or ov.Value.DisplayName:lower()==lowerName then return top end
             end
         end
-        for _, top in ipairs(workspace.Tops:GetChildren()) do
-            if top.Name:lower() == lowerName then return top end
-        end
-        for _, top in ipairs(workspace.Tops:GetChildren()) do
+        for _,top in ipairs(workspace.Tops:GetChildren()) do if top.Name:lower()==lowerName then return top end end
+        for _,top in ipairs(workspace.Tops:GetChildren()) do
             if not tonumber(top.Name) then
-                local tl = top.Name:lower()
-                if tl:find(lowerName, 1, true) or lowerName:find(tl, 1, true) then return top end
+                local tl=top.Name:lower()
+                if tl:find(lowerName,1,true) or lowerName:find(tl,1,true) then return top end
             end
         end
-        for _, top in ipairs(workspace.Tops:GetChildren()) do
+        for _,top in ipairs(workspace.Tops:GetChildren()) do
             if not tonumber(top.Name) then
-                if sharesToken(searchTokens, tokens(top.Name)) then return top end
+                if sharesToken(searchTokens,tokens(top.Name)) then return top end
             end
         end
         return nil
     end
-
     local function getOpponentNameFromTop(oppTop)
         if not oppTop then return nil end
-        local uid = tonumber(oppTop.Name)
-        if uid then
-            local p = Players:GetPlayerByUserId(uid)
-            if p then return p.Name end
-            return "ID:" .. oppTop.Name
-        end
-        local ov = oppTop:FindFirstChild("Owner")
+        local uid=tonumber(oppTop.Name)
+        if uid then local p=Players:GetPlayerByUserId(uid) if p then return p.Name end return "ID:"..oppTop.Name end
+        local ov=oppTop:FindFirstChild("Owner")
         if ov and ov.Value then return ov.Value.Name end
         return oppTop.Name
     end
-
-    -- ── open viewer, polling up to 8s for the top to appear ──────────────────
-
-    local function openForOpponent(oppTop, oppName)
-        local name = oppName or getOpponentNameFromTop(oppTop)
-        if not name or name == "" then return end
-        if name == lastOpponentName then return end
-        lastOpponentName = name
-
-        -- If we already have the top instance, open immediately
+    local function openForOpponent(oppTop,oppName)
+        local name=oppName or getOpponentNameFromTop(oppTop)
+        if not name or name=="" then return end
+        if name==lastOpponentName then return end
+        lastOpponentName=name
         if oppTop and oppTop.Parent then
-            buildViewerGui(name, oppTop)
-            Notify("Auto Viewer", "Opponent: " .. name, 4)
-            return
+            buildViewerGui(name,oppTop) Notify("Auto Viewer","Opponent: "..name,4) return
         end
-
-        -- Otherwise poll up to 8 seconds for it to appear
         task.spawn(function()
-            local deadline = tick() + 8
-            local found = nil
-            repeat
-                found = resolveOpponentTop(name)
-                if found then break end
-                task.wait(0.3)
-            until tick() > deadline or not viewer.autoEnabled or lastOpponentName ~= name
-
-            if not viewer.autoEnabled or lastOpponentName ~= name then return end
-            buildViewerGui(name, found) -- found may still be nil → shows "No top" but at least correct name
-            Notify("Auto Viewer", "Opponent: " .. name, 4)
+            local deadline=tick()+8 local found=nil
+            repeat found=resolveOpponentTop(name) if found then break end task.wait(0.3)
+            until tick()>deadline or not viewer.autoEnabled or lastOpponentName~=name
+            if not viewer.autoEnabled or lastOpponentName~=name then return end
+            buildViewerGui(name,found) Notify("Auto Viewer","Opponent: "..name,4)
         end)
     end
-
-    local function isNPCName(name)
-        if not name then return false end
-        -- Tops whose workspace name is not a UserId number are NPCs/bots
-        for _, top in ipairs(workspace.Tops:GetChildren()) do
-            local ov = top:FindFirstChild("Owner")
-            if ov and ov.Value and (ov.Value.Name == name or ov.Value.DisplayName == name) then
-                return false -- real player
-            end
-            local uid = tonumber(top.Name)
-            if uid then
-                local p = Players:GetPlayerByUserId(uid)
-                if p and p.Name == name then return false end -- real player
-            end
-        end
-        -- Not found as a real player top = treat as NPC
-        return true
-    end
-
-    local function clearOpponent()
-        if lastOpponentName then
-            lastOpponentName = nil
-        end
-    end
-
-    -- ── hook our top's Target child ───────────────────────────────────────────
-
+    local function clearOpponent() lastOpponentName=nil end
     local function hookMyTop(myTop)
-        if targetWatchConn then targetWatchConn:Disconnect() targetWatchConn = nil end
+        if targetWatchConn then targetWatchConn:Disconnect() targetWatchConn=nil end
         if not myTop then clearOpponent() return end
-
-        -- Check immediately: Target may already exist (joined mid-battle)
-        local existingTarget = myTop:FindFirstChild("Target")
+        local existingTarget=myTop:FindFirstChild("Target")
         if existingTarget then
-            local oppTop = existingTarget.Value
-            if oppTop and oppTop.Parent then
-                task.spawn(function() openForOpponent(oppTop, nil) end)
-            elseif oppTop == nil then
-                -- Value not populated yet — wait for it
-                local c2
-                c2 = existingTarget:GetPropertyChangedSignal("Value"):Connect(function()
-                    c2:Disconnect()
-                    local opp = existingTarget.Value
-                    if opp then task.spawn(function() openForOpponent(opp, nil) end) end
+            local oppTop=existingTarget.Value
+            if oppTop and oppTop.Parent then task.spawn(function() openForOpponent(oppTop,nil) end)
+            elseif oppTop==nil then
+                local c2 c2=existingTarget:GetPropertyChangedSignal("Value"):Connect(function()
+                    c2:Disconnect() local opp=existingTarget.Value
+                    if opp then task.spawn(function() openForOpponent(opp,nil) end) end
                 end)
             end
         end
-
-        -- Watch for Target being added (new battle)
-        targetWatchConn = myTop.ChildAdded:Connect(function(child)
-            if child.Name ~= "Target" then return end
-            -- Fire as soon as Value is non-nil
-            local oppTop = child.Value
-            if oppTop and oppTop.Parent then
-                task.spawn(function() openForOpponent(oppTop, nil) end)
+        targetWatchConn=myTop.ChildAdded:Connect(function(child)
+            if child.Name~="Target" then return end
+            local oppTop=child.Value
+            if oppTop and oppTop.Parent then task.spawn(function() openForOpponent(oppTop,nil) end)
             else
-                local c2
-                c2 = child:GetPropertyChangedSignal("Value"):Connect(function()
-                    c2:Disconnect()
-                    local opp = child.Value
-                    if opp then task.spawn(function() openForOpponent(opp, nil) end) end
+                local c2 c2=child:GetPropertyChangedSignal("Value"):Connect(function()
+                    c2:Disconnect() local opp=child.Value
+                    if opp then task.spawn(function() openForOpponent(opp,nil) end) end
                 end)
             end
         end)
-
-        -- Watch for Target removed (battle ended)
         myTop.ChildRemoved:Connect(function(child)
-            if child.Name ~= "Target" then return end
-            task.delay(3, function()
+            if child.Name~="Target" then return end
+            task.delay(3,function()
                 if not viewer.autoEnabled then return end
-                local t2 = workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
-                if not t2 or not t2:FindFirstChild("Target") then
-                    clearOpponent()
-                end
+                local t2=workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
+                if not t2 or not t2:FindFirstChild("Target") then clearOpponent() end
             end)
         end)
     end
-
-    -- ── watch workspace.Tops for our top ─────────────────────────────────────
-
-    local topsAddedConn = workspace.Tops.ChildAdded:Connect(function(top)
+    local topsAddedConn=workspace.Tops.ChildAdded:Connect(function(top)
         if not viewer.autoEnabled then return end
-        if top.Name == tostring(LocalPlayer.UserId) then
-            task.wait(0.2)
-            hookMyTop(top)
-        end
+        if top.Name==tostring(LocalPlayer.UserId) then task.wait(0.2) hookMyTop(top) end
     end)
-
-    local topsRemovedConn = workspace.Tops.ChildRemoved:Connect(function(top)
+    local topsRemovedConn=workspace.Tops.ChildRemoved:Connect(function(top)
         if not viewer.autoEnabled then return end
-        if top.Name == tostring(LocalPlayer.UserId) then
-            hookMyTop(nil)
-        end
+        if top.Name==tostring(LocalPlayer.UserId) then hookMyTop(nil) end
     end)
-
-    -- Hook immediately if top already exists
-    local existingTop = workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
+    local existingTop=workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
     if existingTop then hookMyTop(existingTop) end
-
-    -- EXTRA FALLBACK: watch if any opponent top has Target pointing AT us
-    -- (handles the case where our top lacks the Target child but theirs doesn't)
-    local myId = tostring(LocalPlayer.UserId)
+    local myId=tostring(LocalPlayer.UserId)
     local function checkAllTopsForTargetingUs()
-        for _, top in ipairs(workspace.Tops:GetChildren()) do
-            if top.Name ~= myId then
-                local targetChild = top:FindFirstChild("Target")
+        for _,top in ipairs(workspace.Tops:GetChildren()) do
+            if top.Name~=myId then
+                local targetChild=top:FindFirstChild("Target")
                 if targetChild and targetChild.Value then
-                    local myTop2 = workspace.Tops:FindFirstChild(myId)
-                    if targetChild.Value == myTop2 then
-                        task.spawn(function() openForOpponent(top, nil) end)
-                        return
-                    end
+                    local myTop2=workspace.Tops:FindFirstChild(myId)
+                    if targetChild.Value==myTop2 then task.spawn(function() openForOpponent(top,nil) end) return end
                 end
             end
         end
     end
-    -- Poll this fallback every 2s (lightweight)
-    local fallbackInterval = 0
-    local fallbackConn = RunService.Heartbeat:Connect(function(dt)
+    local fallbackInterval=0
+    local fallbackConn=RunService.Heartbeat:Connect(function(dt)
         if not viewer.autoEnabled then return end
-        fallbackInterval += dt
-        if fallbackInterval < 2.0 then return end
-        fallbackInterval = 0
-        checkAllTopsForTargetingUs()
+        fallbackInterval+=dt if fallbackInterval<2.0 then return end
+        fallbackInterval=0 checkAllTopsForTargetingUs()
     end)
-    -- Add to extra conns so it cleans up properly
-    table.insert(viewer._extraConns or {}, fallbackConn)
-    viewer._extraConns = viewer._extraConns or {}
-    table.insert(viewer._extraConns, fallbackConn)
-
-    -- ── GUI scan fallback for tournament "X vs Y" bracket labels only ─────────
-
-    local myName    = LocalPlayer.Name
-    local myDisplay = LocalPlayer.DisplayName
-
+    local myName=LocalPlayer.Name local myDisplay=LocalPlayer.DisplayName
     local function extractVsLabel(text)
-        if not text or text == "" then return nil end
-        local tl = text:lower()
+        if not text or text=="" then return nil end
+        local tl=text:lower()
         if not tl:find(" vs ") then return nil end
-        if not (tl:find(myName:lower(), 1, true) or tl:find(myDisplay:lower(), 1, true)) then return nil end
-        local left, right = tl:match("^(.-)%s+vs%s+(.+)$")
+        if not (tl:find(myName:lower(),1,true) or tl:find(myDisplay:lower(),1,true)) then return nil end
+        local left,right=tl:match("^(.-)%s+vs%s+(.+)$")
         if not left or not right then return nil end
-        left  = left:gsub("^%s+", ""):gsub("%s+$", "")
-        right = right:gsub("^%s+", ""):gsub("%s+$", "")
-        local myL  = myName:lower()
-        local myDL = myDisplay:lower()
-        local oppL = (left == myL or left == myDL) and right
-                  or (right == myL or right == myDL) and left
-                  or nil
+        left=left:gsub("^%s+",""):gsub("%s+$","") right=right:gsub("^%s+",""):gsub("%s+$","")
+        local myL=myName:lower() local myDL=myDisplay:lower()
+        local oppL=(left==myL or left==myDL) and right or (right==myL or right==myDL) and left or nil
         if not oppL then return nil end
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p.Name:lower() == oppL or p.DisplayName:lower() == oppL then return p.Name end
+        for _,p in ipairs(Players:GetPlayers()) do
+            if p.Name:lower()==oppL or p.DisplayName:lower()==oppL then return p.Name end
         end
         return oppL
     end
-
-    local scanInterval = 0
-    local guiScanConn = RunService.Heartbeat:Connect(function(dt)
-        scanInterval += dt
-        if scanInterval < 1.0 then return end
-        scanInterval = 0
-        for _, gui in ipairs(playerGui:GetChildren()) do
+    local scanInterval=0
+    local guiScanConn=RunService.Heartbeat:Connect(function(dt)
+        scanInterval+=dt if scanInterval<1.0 then return end scanInterval=0
+        for _,gui in ipairs(playerGui:GetChildren()) do
             if gui:IsA("ScreenGui") and gui.Enabled then
-                local function collectLabels(inst, out)
-                    for _, child in ipairs(inst:GetChildren()) do
-                        if child:IsA("TextLabel") and child.Visible then
-                            table.insert(out, child.Text)
-                        end
-                        collectLabels(child, out)
+                local function collectLabels(inst,out)
+                    for _,child in ipairs(inst:GetChildren()) do
+                        if child:IsA("TextLabel") and child.Visible then table.insert(out,child.Text) end
+                        collectLabels(child,out)
                     end
                 end
-                local labels = {}
-                collectLabels(gui, labels)
-                for _, text in ipairs(labels) do
-                    local opp = extractVsLabel(text)
-                    if opp and opp ~= lastOpponentName then
-                        task.spawn(function() openForOpponent(nil, opp) end)
-                        return
-                    end
+                local labels={} collectLabels(gui,labels)
+                for _,text in ipairs(labels) do
+                    local opp=extractVsLabel(text)
+                    if opp and opp~=lastOpponentName then task.spawn(function() openForOpponent(nil,opp) end) return end
                 end
             end
         end
     end)
-
-    viewer.autoConn    = guiScanConn
-    viewer._extraConns = { topsAddedConn, topsRemovedConn }
+    viewer.autoConn=guiScanConn
+    viewer._extraConns={topsAddedConn,topsRemovedConn,fallbackConn}
 end
 
 local function stopAutoOpponentViewer()
-    if viewer.autoConn then viewer.autoConn:Disconnect() viewer.autoConn = nil end
+    if viewer.autoConn then viewer.autoConn:Disconnect() viewer.autoConn=nil end
     if viewer._extraConns then
-        for _, c in ipairs(viewer._extraConns) do pcall(function() c:Disconnect() end) end
-        viewer._extraConns = nil
+        for _,c in ipairs(viewer._extraConns) do pcall(function() c:Disconnect() end) end
+        viewer._extraConns=nil
     end
 end
 
 ESPViewer:AddToggle('AutoOpponentViewer',{
-    Text='Auto Show Opponents Top',
-    Default=false,
+    Text='Auto Show Opponents Top', Default=false,
     Callback=function(value)
         viewer.autoEnabled=value
         if value then
             startAutoOpponentViewer()
-            if not viewer.gui then
-                buildViewerGui("Waiting for beyblade...", nil)
-            end
+            if not viewer.gui then buildViewerGui("Waiting for beyblade...",nil) end
             Notify("Auto Viewer","On! Will auto-show opponent's top in 1v1/tourney.",4)
         else
-            stopAutoOpponentViewer()
-            destroyViewerGui()
-            Notify("Auto Viewer","Off.",3)
+            stopAutoOpponentViewer() destroyViewerGui() Notify("Auto Viewer","Off.",3)
         end
     end,
 })
@@ -2129,16 +1961,28 @@ ESPViewer:AddToggle('AutoOpponentViewer',{
 local MiscLeft  = Tabs.Misc:AddLeftGroupbox('Character')
 local MiscRight = Tabs.Misc:AddRightGroupbox('Server')
 
-MiscLeft:AddButton('Debug My Top', function()
-    local top = getMyTop()
-    if not top then Notify("Debug", "No top in workspace!", 3) return end
-    print("=== MY TOP INFO ===")
-    for k, v in pairs(top:GetAttributes()) do
-        print(k .. " = " .. tostring(v))
-    end
-    Notify("Debug", "Open console with F9!", 4)
-end)
+task.wait(3)
 
+-- DEBUG: print all files found
+pcall(function()
+        local files = listfiles("RequiemTAT")
+        for _, f in ipairs(files) do
+            warn("[Requiem] Trying exact path: " .. tostring(f))
+            if f:lower():find("settings") then
+                local ok, data = pcall(readfile, f)
+                warn("[Requiem] Read result: ok=" .. tostring(ok) .. " len=" .. tostring(ok and #data or tostring(data)))
+                if ok and data and #data > 5 then rawData = data end
+            end
+        end
+    end)
+
+MiscLeft:AddButton('Debug My Top',function()
+    local top=getMyTop()
+    if not top then Notify("Debug","No top in workspace!",3) return end
+    print("=== MY TOP INFO ===")
+    for k,v in pairs(top:GetAttributes()) do print(k.." = "..tostring(v)) end
+    Notify("Debug","Open console with F9!",4)
+end)
 MiscLeft:AddSlider('WalkSpeed',{Text='Walk Speed',Min=16,Max=45,Default=16,Rounding=0,Suffix=' studs/s',Callback=function(value) charState.currentWSValue=value end})
 MiscLeft:AddSlider('JumpPower',{Text='Jump Power',Min=50,Max=100,Default=50,Rounding=0,Suffix=' power',Callback=function(value)
     charState.currentJPValue=value
@@ -2221,13 +2065,12 @@ local function setupUIKeybind()
     connections.uiKeybind=UserInputService.InputBegan:Connect(function(input,gp)
         if gp then return end
         if input.KeyCode==uiToggleKey then
-            if Library.Shown ~= nil then
-                Library.Shown = not Library.Shown
-                if Library.GUI then Library.GUI.Enabled = Library.Shown end
-            elseif Library.Toggle then
-                Library:Toggle()
+            if Library.Shown~=nil then
+                Library.Shown=not Library.Shown
+                if Library.GUI then Library.GUI.Enabled=Library.Shown end
+            elseif Library.Toggle then Library:Toggle()
             elseif Library.Window and Library.Window.GUI then
-                Library.Window.GUI.Enabled = not Library.Window.GUI.Enabled
+                Library.Window.GUI.Enabled=not Library.Window.GUI.Enabled
             end
         end
     end)
@@ -2245,70 +2088,9 @@ if not ok2 then warn("SaveManager error: "..tostring(err2)) end
 
 task.spawn(function()
     task.wait(3)
-    -- Bypass SaveManager entirely, read file directly using listfiles path
-    local rawData = nil
     pcall(function()
-        for _, f in ipairs(listfiles("RequiemTAT")) do
-            if f:lower():find("settings") then
-                local ok2, data = pcall(readfile, f)
-                if ok2 and data and #data > 5 then rawData = data break end
-            end
-        end
+        SaveManager:LoadAutoloadConfig()
     end)
-    local ok = rawData ~= nil
-    local err = "could not read settings file"
-    if rawData then
-        local parsed = nil
-        pcall(function() parsed = HttpService:JSONDecode(rawData) end)
-        if parsed and parsed.objects then
-            local savedValues = {}
-            for _, entry in ipairs(parsed.objects) do
-                if entry.idx then savedValues[entry.idx] = entry.value end
-            end
-            local SKIP = {AutoTrashFarm=true, AutoTrashFarmBlatant=true, AutoLaunchCycle=true}
-            for flag, cb in pairs(toggleCallbacks) do
-                if not SKIP[flag] and savedValues[flag] == true then
-                    pcall(function() cb(true) end)
-                end
-            end
-            local ws = tonumber(savedValues["WalkSpeed"])
-            local jp = tonumber(savedValues["JumpPower"])
-            if ws then charState.currentWSValue = ws end
-            if jp then charState.currentJPValue = jp end
-        else
-            ok = false err = "failed to parse JSON"
-        end
-    end
-    local dummy_ok = ok
-    if dummy_ok then
-        if ok then
-            Notify("Config", "Auto loaded!", 4)
-            task.wait(0.5)
-            for flag, state in pairs(toggleStates) do
-                if state == true then warn("[Requiem] Loaded ON: " .. flag) end
-            end
-            local SKIP = {AutoTrashFarm=true, AutoTrashFarmBlatant=true, AutoLaunchCycle=true}
-            for flag, cb in pairs(toggleCallbacks) do
-                if not SKIP[flag] then
-                    local element = Library.Registry and Library.Registry[flag]
-                    local state = element and element.Value
-                    if state == true then
-                        pcall(function() cb(true) end)
-                    end
-                end
-            end
-            task.wait(0.2)
-            local char = LocalPlayer.Character
-            local h = char and char:FindFirstChild("Humanoid")
-            if h then
-                h.WalkSpeed = charState.currentWSValue
-                h.UseJumpPower = true
-                h.JumpPower = charState.currentJPValue
-            end
-        else
-            warn("[Requiem] Auto-load failed: " .. tostring(err))
-        end
-    end
 end)
 
-Notify("Requiem","Totally Accurate Tops loaded!",3)
+Notify("Requiem", "Totally Accurate Tops loaded!", 3)
