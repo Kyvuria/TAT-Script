@@ -60,6 +60,7 @@ local repo = 'https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main
 local Library = loadstring(game:HttpGet(repo .. 'Library.lua'))()
 local ThemeManager = loadstring(game:HttpGet(repo .. 'addons/ThemeManager.lua'))()
 local SaveManager = loadstring(game:HttpGet(repo .. 'addons/SaveManager.lua'))()
+_G.RequiemSaveManager = SaveManager
 
 local Window = Library:CreateWindow({ Title = 'Requiem | Totally Accurate Tops', Center = true, AutoShow = true })
 task.wait(0.1)
@@ -154,17 +155,16 @@ local function startNoclip()
     if connections.noclip then connections.noclip:Disconnect() end
     connections.noclip = RunService.Stepped:Connect(function()
         local char = LocalPlayer.Character if not char then return end
-        for _, part in ipairs(char:GetDescendants()) do
-            if part:IsA("BasePart") then part.CanCollide=false end
-        end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then hrp.CanCollide = false end
     end)
 end
 local function stopNoclip()
-    if connections.noclip then connections.noclip:Disconnect() connections.noclip=nil end
+    if connections.noclip then connections.noclip:Disconnect() connections.noclip = nil end
+    task.wait()
     local char = LocalPlayer.Character
-    if char then for _, part in ipairs(char:GetDescendants()) do
-        if part:IsA("BasePart") then part.CanCollide=true end
-    end end
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if hrp then hrp.CanCollide = false end -- HRP is always false in normal Roblox characters
 end
 
 -- ── Sprint / wait helpers ─────────────────────────────────────────────────────
@@ -2244,34 +2244,69 @@ end)
 if not ok2 then warn("SaveManager error: "..tostring(err2)) end
 
 task.spawn(function()
-    task.wait(2)
-    if autoLoadConfigName then
-        -- Pause movement enforcer during load to prevent jitter
-        charState.isFreezing=true
-        local loadOk, loadErr = pcall(function() SaveManager:LoadConfig(autoLoadConfigName) end)
-        if loadOk then
-            Notify("Config","Auto loaded: "..autoLoadConfigName, 4)
+    task.wait(3)
+    -- Bypass SaveManager entirely, read file directly using listfiles path
+    local rawData = nil
+    pcall(function()
+        for _, f in ipairs(listfiles("RequiemTAT")) do
+            if f:lower():find("settings") then
+                local ok2, data = pcall(readfile, f)
+                if ok2 and data and #data > 5 then rawData = data break end
+            end
+        end
+    end)
+    local ok = rawData ~= nil
+    local err = "could not read settings file"
+    if rawData then
+        local parsed = nil
+        pcall(function() parsed = HttpService:JSONDecode(rawData) end)
+        if parsed and parsed.objects then
+            local savedValues = {}
+            for _, entry in ipairs(parsed.objects) do
+                if entry.idx then savedValues[entry.idx] = entry.value end
+            end
+            local SKIP = {AutoTrashFarm=true, AutoTrashFarmBlatant=true, AutoLaunchCycle=true}
+            for flag, cb in pairs(toggleCallbacks) do
+                if not SKIP[flag] and savedValues[flag] == true then
+                    pcall(function() cb(true) end)
+                end
+            end
+            local ws = tonumber(savedValues["WalkSpeed"])
+            local jp = tonumber(savedValues["JumpPower"])
+            if ws then charState.currentWSValue = ws end
+            if jp then charState.currentJPValue = jp end
         else
-            warn("[Requiem] SaveManager:LoadConfig failed for '"..autoLoadConfigName.."': "..tostring(loadErr))
-            Notify("Config","Auto load failed: "..tostring(loadErr):sub(1,40), 5)
+            ok = false err = "failed to parse JSON"
         end
-        task.wait(0.5)
-        -- Restore correct speeds then re-enable enforcer
-        local char=LocalPlayer.Character
-        local h=char and char:FindFirstChild("Humanoid")
-        if h then
-            h.WalkSpeed=charState.currentWSValue
-            h.UseJumpPower=true
-            h.JumpPower=charState.currentJPValue
-        end
-        charState.isFreezing=false
     end
-    -- Only fire callbacks for flags that aren't already running
-    local MOVEMENT_FLAGS = {AutoTrashFarm=true, AutoTrashFarmBlatant=true, AutoLaunchCycle=true}
-    for flag, cb in pairs(toggleCallbacks) do
-        local state = toggleStates[flag]
-        if state == true and not MOVEMENT_FLAGS[flag] then
-            pcall(function() cb(true) end)
+    local dummy_ok = ok
+    if dummy_ok then
+        if ok then
+            Notify("Config", "Auto loaded!", 4)
+            task.wait(0.5)
+            for flag, state in pairs(toggleStates) do
+                if state == true then warn("[Requiem] Loaded ON: " .. flag) end
+            end
+            local SKIP = {AutoTrashFarm=true, AutoTrashFarmBlatant=true, AutoLaunchCycle=true}
+            for flag, cb in pairs(toggleCallbacks) do
+                if not SKIP[flag] then
+                    local element = Library.Registry and Library.Registry[flag]
+                    local state = element and element.Value
+                    if state == true then
+                        pcall(function() cb(true) end)
+                    end
+                end
+            end
+            task.wait(0.2)
+            local char = LocalPlayer.Character
+            local h = char and char:FindFirstChild("Humanoid")
+            if h then
+                h.WalkSpeed = charState.currentWSValue
+                h.UseJumpPower = true
+                h.JumpPower = charState.currentJPValue
+            end
+        else
+            warn("[Requiem] Auto-load failed: " .. tostring(err))
         end
     end
 end)
