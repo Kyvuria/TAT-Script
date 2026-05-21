@@ -1623,8 +1623,12 @@ local function buildViewerGui(playerName,top)
     titleLabel.TextSize=14 titleLabel.TextColor3=Color3.fromRGB(220,220,255)
     titleLabel.TextXAlignment=Enum.TextXAlignment.Left titleLabel.TextStrokeTransparency=0.5
     titleLabel.TextStrokeColor3=Color3.fromRGB(0,0,0)
-    local titleSuffix=(playerName=="Waiting for beyblade...") and "" or "'s Top"
-    titleLabel.Text="🔍 "..(playerName or "?")..titleSuffix titleLabel.Parent=titleBg
+    local function toTitleCase(s)
+    return (s:gsub("(%a)([%w_']*)", function(a,b) return a:upper()..b:lower() end))
+end
+local displayName = (playerName == "Waiting for beyblade..." or playerName == "Waiting for match...") and playerName or toTitleCase(playerName)
+local titleSuffix=(playerName=="Waiting for beyblade...") and "" or "'s Top"
+    titleLabel.Text="🔍 "..(displayName or "?")..titleSuffix titleLabel.Parent=titleBg
     local closeBtn=Instance.new("TextButton")
     closeBtn.BackgroundColor3=Color3.fromRGB(180,40,40) closeBtn.BackgroundTransparency=0.2
     closeBtn.Size=UDim2.new(0,26,0,26) closeBtn.Position=UDim2.new(1,-32,0,5)
@@ -1655,7 +1659,11 @@ local function buildViewerGui(playerName,top)
     local function attr(a) local v=top:GetAttribute(a) return v~=nil and tostring(v) or "?" end
     local function partAttr(pName)
         local part=top:FindFirstChild(pName) if not part then return "?" end
-        local n=part:GetAttribute("Name") return (n and tostring(n)~="") and tostring(n) or "?"
+        local n=part:GetAttribute("Name")
+        if n and tostring(n)~="" then return tostring(n) end
+        local iname=part.Name
+        if iname and iname~=pName and iname~="" then return iname end
+        return "?"
     end
     local y=0
     makeRow("Spirit:",attr("Spirit"),Color3.fromRGB(160,160,180),Color3.fromRGB(180,120,255),y) y+=22
@@ -1703,6 +1711,15 @@ local function buildViewerGui(playerName,top)
         updateInterval+=dt if updateInterval<0.12 then return end updateInterval=0
         -- Top no longer exists in workspace at all
         if not top or not top.Parent then
+            -- If this was an NPC/bot top (tourney bot), clear immediately instead of countdown
+            local ownerVal = top and top:FindFirstChild("Owner")
+            local ownerName = ownerVal and ownerVal.Value and ownerVal.Value.Name
+            local isNPC = ownerName and not Players:FindFirstChild(ownerName)
+            if isNPC then
+                if viewer.liveConn then viewer.liveConn:Disconnect() viewer.liveConn=nil end
+                task.spawn(function() buildViewerGui("Waiting for beyblade...", nil) end)
+                return
+            end
             if not recalledTime then
                 recalledTime = tick()
                 rpmBarFill.Size = UDim2.new(0, 0, 1, 0)
@@ -1894,10 +1911,27 @@ local function startAutoOpponentViewer()
         end)
     end
 
+    local function isNPCName(name)
+        if not name then return false end
+        -- Tops whose workspace name is not a UserId number are NPCs/bots
+        for _, top in ipairs(workspace.Tops:GetChildren()) do
+            local ov = top:FindFirstChild("Owner")
+            if ov and ov.Value and (ov.Value.Name == name or ov.Value.DisplayName == name) then
+                return false -- real player
+            end
+            local uid = tonumber(top.Name)
+            if uid then
+                local p = Players:GetPlayerByUserId(uid)
+                if p and p.Name == name then return false end -- real player
+            end
+        end
+        -- Not found as a real player top = treat as NPC
+        return true
+    end
+
     local function clearOpponent()
         if lastOpponentName then
             lastOpponentName = nil
-            buildViewerGui("Waiting for beyblade...", nil)
         end
     end
 
@@ -1974,6 +2008,37 @@ local function startAutoOpponentViewer()
     -- Hook immediately if top already exists
     local existingTop = workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
     if existingTop then hookMyTop(existingTop) end
+
+    -- EXTRA FALLBACK: watch if any opponent top has Target pointing AT us
+    -- (handles the case where our top lacks the Target child but theirs doesn't)
+    local myId = tostring(LocalPlayer.UserId)
+    local function checkAllTopsForTargetingUs()
+        for _, top in ipairs(workspace.Tops:GetChildren()) do
+            if top.Name ~= myId then
+                local targetChild = top:FindFirstChild("Target")
+                if targetChild and targetChild.Value then
+                    local myTop2 = workspace.Tops:FindFirstChild(myId)
+                    if targetChild.Value == myTop2 then
+                        task.spawn(function() openForOpponent(top, nil) end)
+                        return
+                    end
+                end
+            end
+        end
+    end
+    -- Poll this fallback every 2s (lightweight)
+    local fallbackInterval = 0
+    local fallbackConn = RunService.Heartbeat:Connect(function(dt)
+        if not viewer.autoEnabled then return end
+        fallbackInterval += dt
+        if fallbackInterval < 2.0 then return end
+        fallbackInterval = 0
+        checkAllTopsForTargetingUs()
+    end)
+    -- Add to extra conns so it cleans up properly
+    table.insert(viewer._extraConns or {}, fallbackConn)
+    viewer._extraConns = viewer._extraConns or {}
+    table.insert(viewer._extraConns, fallbackConn)
 
     -- ── GUI scan fallback for tournament "X vs Y" bracket labels only ─────────
 
