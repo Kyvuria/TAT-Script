@@ -1969,7 +1969,7 @@ MiscLeft:AddButton('Debug My Top',function()
     Notify("Debug","Open console with F9!",4)
 end)
 MiscLeft:AddSlider('WalkSpeed',{Text='Walk Speed',Min=16,Max=45,Default=16,Rounding=0,Suffix=' studs/s',Callback=function(value) charState.currentWSValue=value end})
-MiscLeft:AddSlider('JumpPower',{Text='Jump Power',Min=50,Max=100,Default=50,Rounding=0,Suffix=' power',Callback=function(value)
+MiscLeft:AddSlider('JumpPower',{Text='Jump Power',Min=50,Max=150,Default=50,Rounding=0,Suffix=' power',Callback=function(value)
     charState.currentJPValue=value
     local char=LocalPlayer.Character local humanoid=char and char:FindFirstChild("Humanoid")
     if humanoid then humanoid.UseJumpPower=true humanoid.JumpPower=value end
