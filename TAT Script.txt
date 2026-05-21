@@ -1704,17 +1704,20 @@ local function buildViewerGui(playerName,top)
         -- Top no longer exists in workspace at all
         if not top or not top.Parent then
             if not recalledTime then
-                recalledTime=tick()
-                rpmValLabel.Text="N/A"
-                rpmBarFill.Size=UDim2.new(0,0,1,0)
+                recalledTime = tick()
+                rpmBarFill.Size = UDim2.new(0, 0, 1, 0)
+                rpmBarFill.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
             end
-            local left=math.ceil(RECALLED_WAIT-(tick()-recalledTime))
-            if left>0 then
-                stateValLabel.Text="Recalled ("..left.."s)"
-                stateValLabel.TextColor3=Color3.fromRGB(200,180,0)
+            local left = math.ceil(RECALLED_WAIT - (tick() - recalledTime))
+            if left > 0 then
+                stateValLabel.Text = "Recalled (" .. left .. "s)"
+                stateValLabel.TextColor3 = Color3.fromRGB(200, 180, 0)
+                rpmValLabel.Text = "0 / 0"
+                rpmValLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+                rpmPctLabel.Text = "0%"
+                rpmPctLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
             else
-                -- 10s elapsed — fully rebuild viewer to clear all stale stats
-                recalledTime=nil
+                recalledTime = nil
                 if viewer.liveConn then viewer.liveConn:Disconnect() viewer.liveConn=nil end
                 task.spawn(function() buildViewerGui("Waiting for beyblade...", nil) end)
             end
@@ -2032,67 +2035,6 @@ end
 
 local function stopAutoOpponentViewer()
     if viewer.autoConn then viewer.autoConn:Disconnect() viewer.autoConn = nil end
-    if viewer._extraConns then
-        for _, c in ipairs(viewer._extraConns) do pcall(function() c:Disconnect() end) end
-        viewer._extraConns = nil
-    end
-end
-
-
--- ─────────────────────────────────────────────────────────────────────────────
--- ALSO REPLACE this block inside buildViewerGui's viewer.liveConn heartbeat:
---
--- FIND (the "top no longer exists" section):
---
---        if not top or not top.Parent then
---            if not recalledTime then
---                recalledTime=tick()
---                rpmValLabel.Text="N/A"
---                rpmBarFill.Size=UDim2.new(0,0,1,0)
---            end
---            local left=math.ceil(RECALLED_WAIT-(tick()-recalledTime))
---            if left>0 then
---                stateValLabel.Text="Recalled ("..left.."s)"
---                stateValLabel.TextColor3=Color3.fromRGB(200,180,0)
---            else
---                -- 10s elapsed — fully rebuild viewer to clear all stale stats
---                recalledTime=nil
---                if viewer.liveConn then viewer.liveConn:Disconnect() viewer.liveConn=nil end
---                task.spawn(function() buildViewerGui("Waiting for beyblade...", nil) end)
---            end
---            return
---        end
---
--- REPLACE WITH:
---
---        if not top or not top.Parent then
---            if not recalledTime then
---                recalledTime = tick()
---                -- Keep last RPM values visible — just zero the bar fill
---                rpmBarFill.Size = UDim2.new(0, 0, 1, 0)
---                rpmBarFill.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
---            end
---            local left = math.ceil(RECALLED_WAIT - (tick() - recalledTime))
---            if left > 0 then
---                -- Show countdown but keep all other stats visible
---                stateValLabel.Text = "Recalled (" .. left .. "s)"
---                stateValLabel.TextColor3 = Color3.fromRGB(200, 180, 0)
---                rpmValLabel.Text = "0 / " .. tostring(math.floor((top and top:GetAttribute("MaxHealth") or 0) * 20))
---                rpmValLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
---                rpmPctLabel.Text = "0%"
---                rpmPctLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
---            else
---                -- 10s elapsed — only NOW reset to waiting
---                recalledTime = nil
---                if viewer.liveConn then viewer.liveConn:Disconnect() viewer.liveConn = nil end
---                task.spawn(function() buildViewerGui("Waiting for beyblade...", nil) end)
---            end
---            return
---        end
--- ─────────────────────────────────────────────────────────────────────────────
-
-local function stopAutoOpponentViewer()
-    if viewer.autoConn then viewer.autoConn:Disconnect() viewer.autoConn=nil end
     if viewer._extraConns then
         for _, c in ipairs(viewer._extraConns) do pcall(function() c:Disconnect() end) end
         viewer._extraConns = nil
