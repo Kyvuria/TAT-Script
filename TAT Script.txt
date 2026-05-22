@@ -1761,7 +1761,7 @@ local function buildViewerGui(playerName,top)
     viewer.gui=sg
     local frame=Instance.new("Frame")
     frame.BackgroundColor3=Color3.fromRGB(10,10,20) frame.BackgroundTransparency=0.15
-    frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,420)  -- Increased height for passion bars
+    frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,440)  -- Increased height for passion bars
     frame.Position=UDim2.new(1,-295,0.5,-220) frame.Parent=sg
     Instance.new("UICorner",frame).CornerRadius=UDim.new(0,8)
     local dragging,dragStart,startPos=false,nil,nil
@@ -2011,7 +2011,18 @@ local function buildViewerGui(playerName,top)
     makeRow("Type:",typeStr,Color3.fromRGB(160,160,180),typeDisplayColor,y) y+=20
     makeRow("ATK:",attr("Attack"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,80,80),y) y+=20
     makeRow("DEF:",attr("Defense"),Color3.fromRGB(160,160,180),Color3.fromRGB(80,220,80),y) y+=20
-    makeRow("STA:",attr("Stamina"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,200,0),y) y+=22
+    makeRow("STA:",attr("Stamina"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,200,0),y) y+=20
+    local rawStyleType=top:GetAttribute("LaunchType") or top:GetAttribute("Type") or top:GetAttribute("Style") or "?"
+    local styleTypeStr=tostring(rawStyleType)
+    local typeMap2={Attack="Rush",Stamina="Focused",Defense="Bunker",Balance="Wobble",Standard="Standard"}
+    local styleDisplay=typeMap2[styleTypeStr] or styleTypeStr
+    local styleTypeColor
+    if styleDisplay:lower():find("rush") or styleDisplay:lower():find("attack") then styleTypeColor=Color3.fromRGB(255,60,60)
+    elseif styleDisplay:lower():find("focus") or styleDisplay:lower():find("stamina") then styleTypeColor=Color3.fromRGB(255,200,0)
+    elseif styleDisplay:lower():find("bunker") or styleDisplay:lower():find("defense") then styleTypeColor=Color3.fromRGB(80,200,80)
+    elseif styleDisplay:lower():find("wobble") or styleDisplay:lower():find("balance") then styleTypeColor=Color3.fromRGB(180,80,255)
+    else styleTypeColor=Color3.fromRGB(200,200,200) end
+    makeRow("Style:",styleDisplay,Color3.fromRGB(160,160,180),styleTypeColor,y) y+=22
     makeDivider(y) y+=4
     local rpmLabel=Instance.new("TextLabel") rpmLabel.BackgroundTransparency=1 rpmLabel.Size=UDim2.new(0.32,0,0,18) rpmLabel.Position=UDim2.new(0,0,0,y) rpmLabel.Font=Enum.Font.GothamBold rpmLabel.TextSize=11 rpmLabel.TextColor3=Color3.fromRGB(160,160,180) rpmLabel.TextXAlignment=Enum.TextXAlignment.Left rpmLabel.Text="RPM:" rpmLabel.Parent=content
     local rpmValLabel=Instance.new("TextLabel") rpmValLabel.Name="RPMVal" rpmValLabel.BackgroundTransparency=1 rpmValLabel.Size=UDim2.new(0.38,0,0,18) rpmValLabel.Position=UDim2.new(0.32,0,0,y) rpmValLabel.Font=Enum.Font.GothamBold rpmValLabel.TextSize=11 rpmValLabel.TextColor3=Color3.fromRGB(0,200,255) rpmValLabel.TextXAlignment=Enum.TextXAlignment.Left rpmValLabel.Text="..." rpmValLabel.Parent=content
