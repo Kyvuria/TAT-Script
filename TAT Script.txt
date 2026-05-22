@@ -138,6 +138,146 @@ local STATE_COLORS = {
     Idle=Color3.fromRGB(200,200,200), Recalling=Color3.fromRGB(0,180,160),
 }
 
+-- ── PASSION COST LOOKUP TABLE ─────────────────────────────────────────────────
+-- Actual passion costs sourced directly from in-game move selection screens
+local MOVE_PASSION_COSTS = {
+    -- Cerberus
+    ["UnforgivingRage"] = 750,
+    ["TripleBiteStrike"] = 1000,
+    ["SpiritBlade"] = 1000,
+    ["Inferno"] = 2900,
+    -- Unicorn
+    ["ShiningSpirallDriver"] = 1150,
+    ["BlindingGrace"] = 1000,
+    ["EtherealFallingBuster"] = 1750,
+    ["1000StarsOrbitalFallingBuster"] = 7000,
+    -- Fox
+    ["DeadlyDance"] = 800,
+    ["Levitate"] = 700,
+    ["StoneWallofWind"] = 900,
+    ["Waveruption"] = 1600,
+    -- Reaper
+    ["SpiritBlade"] = 1000,
+    ["Siphon"] = 1400,
+    ["DeadlyVeil"] = 1600,
+    -- Basilisk
+    ["TauntingGlare"] = 1000,
+    ["VenomousGuard"] = 900,
+    ["WildWindstorm"] = 2200,
+    -- Cheetah
+    ["DeadlyHunt"] = 850,
+    ["PersistentPounce"] = 850,
+    -- Griffin
+    ["WindClaw"] = 900,
+    ["SkyborneStrike"] = 1250,
+    ["WildWindstorm"] = 2200,
+    -- Wolf
+    ["BalancedBlow"] = 800,
+    ["ShadowGrowlBarrage"] = 1350,
+    -- Lion
+    ["UltimateWindstorm"] = 6500,
+    -- Dolphin
+    ["EchoingDeep"] = 900,
+    ["FlowingSpirit"] = 1200,
+    ["TsunamiBurst"] = 1700,
+    -- Shark
+    ["GreatFlood"] = 1600,
+    -- Poseidon
+    ["WorldBreaker"] = 2900,
+    -- Mouse
+    ["LagSpike"] = 750,
+    ["Glitch"] = 800,
+    ["SpawnChain"] = 1400,
+    ["RealityDrive"] = 2600,
+    -- Dragon
+    ["DraconicHunger"] = 1000,
+    ["TremblingRoar"] = 750,
+    ["WorldBreakerDevastation"] = 7000,
+    -- Pekin
+    ["GreatFlood"] = 1600,
+    -- Phoenix
+    ["EternalStance"] = 1000,
+    ["SkyborneStrike"] = 1250,
+    ["RecklessResurrection"] = 2400,
+    ["SupernovaAnnihilation"] = 7000,
+    -- Kraken
+    ["InvisibleInk"] = 800,
+    ["MudTime"] = 1000,
+    -- Crab
+    ["MudTime"] = 1000,
+    -- Shared moves (same cost regardless of spirit)
+    ["UnforgivingRage"] = 750,
+    ["WindWall"] = 900,
+    ["StoneWallofWind"] = 900,
+    ["FallingBuster"] = 675,
+    ["BlindingGrace"] = 900,
+}
+
+-- More precise per-move lookup by exact attribute name
+-- (SignatureMove_N stores the exact string from the game)
+local MOVE_COST_EXACT = {
+    -- Universal moves
+    ["UnforgivingRage"]              = 750,
+    ["UnforgivingRage"]              = 750,
+    ["WindWall"]                     = 900,
+    ["StoneWallofWind"]              = 900,
+    ["Levitate"]                     = 700,
+    ["FlowingSpirit"]                = 1200,
+    ["EchoingDeep"]                  = 900,
+    ["TsunamiBurst"]                 = 1700,
+    ["GreatFlood"]                   = 1600,
+    ["WildWindstorm"]                = 2200,
+    ["Waveruption"]                  = 1600,
+    ["BlindingGrace"]                = 1000,
+    ["FallingBuster"]                = 675,
+    ["SpiritBlade"]                  = 1000,
+    ["TripleBiteStrike"]             = 1000,
+    ["Inferno"]                      = 2900,
+    ["ShiningSpirallDriver"]         = 1150,
+    ["EtherealFallingBuster"]        = 1750,
+    ["1,000 Stars: Orbital Falling Buster"] = 7000,
+    ["DeadlyDance"]                  = 800,
+    ["DeadlyHunt"]                   = 850,
+    ["PersistentPounce"]             = 850,
+    ["TauntingGlare"]                = 1000,
+    ["VenomousGuard"]                = 900,
+    ["BalancedBlow"]                 = 800,
+    ["ShadowGrowlBarrage"]           = 1350,
+    ["WindClaw"]                     = 900,
+    ["SkyborneStrike"]               = 1250,
+    ["UltimateWindstorm"]            = 6500,
+    ["WorldBreaker"]                 = 2900,
+    ["WorldBreaker: Devastation"]    = 7000,
+    ["LagSpike"]                     = 750,
+    ["Glitch"]                       = 800,
+    ["SpawnChain"]                   = 1400,
+    ["RealityDrive"]                 = 2600,
+    ["DraconicHunger"]               = 1000,
+    ["TremblingRoar"]                = 750,
+    ["EternalStance"]                = 1000,
+    ["RecklessResurrection"]         = 2400,
+    ["SupernovaAnnihilation"]        = 7000,
+    ["InvisibleInk"]                 = 800,
+    ["MudTime"]                      = 1000,
+    ["Siphon"]                       = 1400,
+    ["DeadlyVeil"]                   = 1600,
+    ["TripleBiteStrike"]             = 1000,
+    ["Inferno"]                      = 2900,
+}
+
+local function getMoveCost(moveName)
+    if not moveName or moveName == "?" or moveName == "none" or moveName == "None" then return nil end
+    -- Try exact match first
+    local cost = MOVE_COST_EXACT[moveName]
+    if cost then return cost end
+    -- Try case-insensitive / stripped match
+    local stripped = moveName:gsub("[%s%p]", ""):lower()
+    for k, v in pairs(MOVE_COST_EXACT) do
+        if k:gsub("[%s%p]", ""):lower() == stripped then return v end
+    end
+    return nil
+end
+
 -- ── Character speed heartbeat ─────────────────────────────────────────────────
 RunService.Heartbeat:Connect(function()
     if charState.isFreezing then return end
@@ -1581,8 +1721,8 @@ local function buildViewerGui(playerName,top)
     viewer.gui=sg
     local frame=Instance.new("Frame")
     frame.BackgroundColor3=Color3.fromRGB(10,10,20) frame.BackgroundTransparency=0.15
-    frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,382)
-    frame.Position=UDim2.new(1,-295,0.5,-191) frame.Parent=sg
+    frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,440)  -- Increased height for passion bars
+    frame.Position=UDim2.new(1,-295,0.5,-220) frame.Parent=sg
     Instance.new("UICorner",frame).CornerRadius=UDim.new(0,8)
     local dragging,dragStart,startPos=false,nil,nil
     local dragHandle=Instance.new("TextButton")
@@ -1662,10 +1802,63 @@ local function buildViewerGui(playerName,top)
     makeRow("Belt:",partAttr("Belt"),Color3.fromRGB(160,160,180),Color3.fromRGB(205,133,63),y) y+=20
     makeRow("Point:",partAttr("Point"),Color3.fromRGB(160,160,180),Color3.fromRGB(220,220,220),y) y+=22
     makeDivider(y) y+=4
-    makeRow("Move 1:",attr("SignatureMove_1"),Color3.fromRGB(160,160,180),Color3.fromRGB(100,200,255),y) y+=20
-    makeRow("Move 2:",attr("SignatureMove_2"),Color3.fromRGB(160,160,180),Color3.fromRGB(100,200,255),y) y+=20
-    makeRow("Move 3:",attr("SignatureMove_3"),Color3.fromRGB(160,160,180),Color3.fromRGB(100,200,255),y) y+=22
+
+    -- ── MOVES WITH PASSION BARS ───────────────────────────────────────────────
+    -- Helper: build a passion bar + label under a move row
+    local passionBarFills = {}  -- indexed 1,2,3 for live update
+    local passionTextLabels = {}
+
+    local function makePassionBarUnderMove(moveNum, moveName, yOffset)
+        local cost = getMoveCost(moveName)
+        -- Bar background
+        local barBG = Instance.new("Frame")
+        barBG.BackgroundColor3 = Color3.fromRGB(25,25,35)
+        barBG.BorderSizePixel = 0
+        barBG.Size = UDim2.new(1,0,0,7)
+        barBG.Position = UDim2.new(0,0,0,yOffset)
+        barBG.Parent = content
+        Instance.new("UICorner",barBG).CornerRadius = UDim.new(0,3)
+
+        local barFill = Instance.new("Frame")
+        barFill.BorderSizePixel = 0
+        barFill.Size = UDim2.new(0,0,1,0)
+        barFill.BackgroundColor3 = Color3.fromRGB(100,200,255)
+        barFill.Parent = barBG
+        Instance.new("UICorner",barFill).CornerRadius = UDim.new(0,3)
+
+        -- Passion text label (right-aligned, tiny)
+        local pLabel = Instance.new("TextLabel")
+        pLabel.BackgroundTransparency = 1
+        pLabel.Size = UDim2.new(1,0,0,7)
+        pLabel.Position = UDim2.new(0,0,0,yOffset)
+        pLabel.Font = Enum.Font.GothamBold
+        pLabel.TextSize = 9
+        pLabel.TextColor3 = Color3.fromRGB(180,180,180)
+        pLabel.TextXAlignment = Enum.TextXAlignment.Right
+        pLabel.TextStrokeTransparency = 0.5
+        pLabel.TextStrokeColor3 = Color3.fromRGB(0,0,0)
+        pLabel.Text = cost and ("0/"..cost) or "?"
+        pLabel.Parent = content
+
+        passionBarFills[moveNum] = {fill=barFill, label=pLabel, cost=cost}
+    end
+
+    local move1 = attr("SignatureMove_1")
+    local move2 = attr("SignatureMove_2")
+    local move3 = attr("SignatureMove_3")
+
+    makeRow("Move 1:", move1, Color3.fromRGB(160,160,180), Color3.fromRGB(100,200,255), y) y+=18
+    makePassionBarUnderMove(1, move1, y) y+=11
+
+    makeRow("Move 2:", move2, Color3.fromRGB(160,160,180), Color3.fromRGB(100,200,255), y) y+=18
+    makePassionBarUnderMove(2, move2, y) y+=11
+
+    makeRow("Move 3:", move3, Color3.fromRGB(160,160,180), Color3.fromRGB(100,200,255), y) y+=18
+    makePassionBarUnderMove(3, move3, y) y+=14
+
     makeDivider(y) y+=4
+    -- ── END MOVES WITH PASSION BARS ──────────────────────────────────────────
+
     local rawType = top:GetAttribute("Type") or top:GetAttribute("Style") or "?"
     local typeStr = tostring(rawType)
     local typeDisplayColor
@@ -1746,6 +1939,43 @@ local function buildViewerGui(playerName,top)
         local stateMap={Recalling="Recalled"}
         local displayState=stateMap[state] or (state~="" and state or "Idle")
         stateValLabel.Text=displayState stateValLabel.TextColor3=STATE_COLORS[state] or Color3.fromRGB(200,200,200)
+
+        -- ── UPDATE PASSION BARS ───────────────────────────────────────────────
+        for moveNum=1,3 do
+            local barData=passionBarFills[moveNum]
+            if barData and barData.fill and barData.fill.Parent then
+                local passion=tonumber(top:GetAttribute("Passion_"..moveNum)) or 0
+                local cost=barData.cost
+                if cost then
+                    local fp=math.clamp(passion/math.max(cost,1),0,1)
+                    local ready=(passion>=cost)
+                    barData.fill.Size=UDim2.new(fp,0,1,0)
+                    -- Color: purple=ready, blue=halfway+, orange=low
+                    if ready then
+                        barData.fill.BackgroundColor3=Color3.fromRGB(180,80,255)
+                    elseif fp>=0.5 then
+                        barData.fill.BackgroundColor3=Color3.fromRGB(100,200,255)
+                    else
+                        barData.fill.BackgroundColor3=Color3.fromRGB(255,165,0)
+                    end
+                    barData.label.Text=passion.."/"..cost
+                    barData.label.TextColor3=ready and Color3.fromRGB(200,150,255) or Color3.fromRGB(160,160,160)
+                else
+                    -- No cost known — show raw passion from attribute
+                    local maxPassion=tonumber(top:GetAttribute("MaxPassion_"..moveNum)) or 0
+                    if maxPassion>0 then
+                        local fp=math.clamp(passion/maxPassion,0,1)
+                        barData.fill.Size=UDim2.new(fp,0,1,0)
+                        barData.fill.BackgroundColor3=fp>=1 and Color3.fromRGB(180,80,255) or Color3.fromRGB(100,200,255)
+                        barData.label.Text=passion.."/"..maxPassion
+                    else
+                        barData.fill.Size=UDim2.new(0,0,1,0)
+                        barData.label.Text=passion.."/?"
+                    end
+                end
+            end
+        end
+        -- ── END PASSION BAR UPDATE ────────────────────────────────────────────
     end)
 end
 
@@ -1880,7 +2110,6 @@ local function startAutoOpponentViewer()
     local myId=tostring(LocalPlayer.UserId)
     local function checkAllTopsForTargetingUs()
         local myTop2=workspace.Tops:FindFirstChild(myId)
-        -- First try Target-based detection
         if myTop2 then
             local myTarget=myTop2:FindFirstChild("Target")
             if myTarget and myTarget.Value and myTarget.Value.Parent then
@@ -1891,7 +2120,6 @@ local function startAutoOpponentViewer()
                 end
             end
         end
-        -- Fallback: only works if exactly ONE other real player top is spinning (free roam 1v1 only)
         local myHealth=myTop2 and myTop2:GetAttribute("Health")
         local myIsSpinning=myTop2 and myHealth and myHealth>0
         if not myIsSpinning then return end
@@ -1908,7 +2136,6 @@ local function startAutoOpponentViewer()
                 end
             end
         end
-        -- only run closest-top fallback during actual matches (IsStadiumFight = true)
         local myTop3=workspace.Tops:FindFirstChild(myId)
         local inMatch=myTop3 and myTop3:GetAttribute("IsStadiumFight")==true
         if not inMatch then return end
@@ -1935,7 +2162,6 @@ local function startAutoOpponentViewer()
         if not text or text=="" then return nil end
         local tl=text:lower()
         if not tl:find(" vs ") then return nil end
-        -- keep going even if name not found, we'll check both sides
         local left,right=tl:match("^(.-)%s+vs%s+(.+)$")
         if not left or not right then return nil end
         left=left:gsub("^%s+",""):gsub("%s+$","") right=right:gsub("^%s+",""):gsub("%s+$","")
@@ -2016,8 +2242,6 @@ MiscLeft:AddToggle('InfiniteZoom',{Text='Infinite Zoom',Default=false,Callback=f
     if value then
         local camera = workspace.CurrentCamera
         camera.FieldOfView = 70
-        local minZoom = LocalPlayer.CameraMinZoomDistance
-        local maxZoom = LocalPlayer.CameraMaxZoomDistance
         LocalPlayer.CameraMinZoomDistance = 0.5
         LocalPlayer.CameraMaxZoomDistance = 500
         Notify("Infinite Zoom","Enabled! Scroll to zoom.",2)
