@@ -1700,11 +1700,11 @@ local function buildViewerGui(playerName,top)
             local ownerVal=top and top:FindFirstChild("Owner")
             local ownerName=ownerVal and ownerVal.Value and ownerVal.Value.Name
             local isNPC=ownerName and not Players:FindFirstChild(ownerName)
-            if isNPC then
-                if viewer.liveConn then viewer.liveConn:Disconnect() viewer.liveConn=nil end
-                task.spawn(function() buildViewerGui("Waiting for beyblade...",nil) end)
-                return
-            end
+            if isNPC then return end
+            local ownerVal2=top and top:FindFirstChild("Owner")
+            local ownerName2=ownerVal2 and ownerVal2.Value and ownerVal2.Value.Name
+            local isNPC2=ownerName2 and not Players:FindFirstChild(ownerName2)
+            if isNPC2 then return end
             if not recalledTime then
                 recalledTime=tick()
                 rpmBarFill.Size=UDim2.new(0,0,1,0)
@@ -1879,20 +1879,55 @@ local function startAutoOpponentViewer()
     if existingTop then hookMyTop(existingTop) end
     local myId=tostring(LocalPlayer.UserId)
     local function checkAllTopsForTargetingUs()
-        for _,top in ipairs(workspace.Tops:GetChildren()) do
-            if top.Name~=myId then
-                local targetChild=top:FindFirstChild("Target")
-                if targetChild and targetChild.Value then
-                    local myTop2=workspace.Tops:FindFirstChild(myId)
-                    if targetChild.Value==myTop2 then task.spawn(function() openForOpponent(top,nil) end) return end
+        local myTop2=workspace.Tops:FindFirstChild(myId)
+        -- First try Target-based detection
+        if myTop2 then
+            local myTarget=myTop2:FindFirstChild("Target")
+            if myTarget and myTarget.Value and myTarget.Value.Parent then
+                local oppTop=myTarget.Value
+                local oppName=getOpponentNameFromTop(oppTop)
+                if oppName and oppName~=lastOpponentName then
+                    task.spawn(function() openForOpponent(oppTop,oppName) end) return
                 end
             end
+        end
+        -- Fallback: only works if exactly ONE other real player top is spinning (free roam 1v1 only)
+        local myHealth=myTop2 and myTop2:GetAttribute("Health")
+        local myIsSpinning=myTop2 and myHealth and myHealth>0
+        if not myIsSpinning then return end
+        local spinningOpponents={}
+        for _,top in ipairs(workspace.Tops:GetChildren()) do
+            if top.Name~=myId then
+                local uid=tonumber(top.Name)
+                local ownerPlayer=uid and Players:GetPlayerByUserId(uid)
+                if ownerPlayer then
+                    local theirHealth=top:GetAttribute("Health")
+                    if theirHealth and theirHealth>0 then
+                        table.insert(spinningOpponents,{top=top,name=ownerPlayer.Name})
+                    end
+                end
+            end
+        end
+        -- only run closest-top fallback during actual matches (IsStadiumFight = true)
+        local myTop3=workspace.Tops:FindFirstChild(myId)
+        local inMatch=myTop3 and myTop3:GetAttribute("IsStadiumFight")==true
+        if not inMatch then return end
+        local hrp=LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local closest=nil local closestDist=math.huge
+        for _,opp in ipairs(spinningOpponents) do
+            local pos=opp.top:GetPivot().Position
+            local dist=(hrp.Position-pos).Magnitude
+            if dist<closestDist then closestDist=dist closest=opp end
+        end
+        if closest and closestDist<80 and closest.name~=lastOpponentName then
+            task.spawn(function() openForOpponent(closest.top,closest.name) end)
         end
     end
     local fallbackInterval=0
     local fallbackConn=RunService.Heartbeat:Connect(function(dt)
         if not viewer.autoEnabled then return end
-        fallbackInterval+=dt if fallbackInterval<2.0 then return end
+        fallbackInterval+=dt if fallbackInterval<0.5 then return end
         fallbackInterval=0 checkAllTopsForTargetingUs()
     end)
     local myName=LocalPlayer.Name local myDisplay=LocalPlayer.DisplayName
@@ -1900,7 +1935,7 @@ local function startAutoOpponentViewer()
         if not text or text=="" then return nil end
         local tl=text:lower()
         if not tl:find(" vs ") then return nil end
-        if not (tl:find(myName:lower(),1,true) or tl:find(myDisplay:lower(),1,true)) then return nil end
+        -- keep going even if name not found, we'll check both sides
         local left,right=tl:match("^(.-)%s+vs%s+(.+)$")
         if not left or not right then return nil end
         left=left:gsub("^%s+",""):gsub("%s+$","") right=right:gsub("^%s+",""):gsub("%s+$","")
@@ -1914,7 +1949,7 @@ local function startAutoOpponentViewer()
     end
     local scanInterval=0
     local guiScanConn=RunService.Heartbeat:Connect(function(dt)
-        scanInterval+=dt if scanInterval<1.0 then return end scanInterval=0
+        scanInterval+=dt if scanInterval<0.2 then return end scanInterval=0
         for _,gui in ipairs(playerGui:GetChildren()) do
             if gui:IsA("ScreenGui") and gui.Enabled then
                 local function collectLabels(inst,out)
@@ -1950,7 +1985,7 @@ ESPViewer:AddToggle('AutoOpponentViewer',{
         if value then
             startAutoOpponentViewer()
             if not viewer.gui then buildViewerGui("Waiting for beyblade...",nil) end
-            Notify("Auto Viewer","On! Will auto-show opponent's top in 1v1/tourney.",4)
+            Notify("Auto Viewer","On! Will auto-show opponent's top in 1v1s/tournement.",4)
         else
             stopAutoOpponentViewer() destroyViewerGui() Notify("Auto Viewer","Off.",3)
         end
