@@ -90,6 +90,7 @@ local connections = {
     perfect=nil, autoEnergy=nil, antiAFK=nil, idled=nil, noclip=nil,
     stateKeeper=nil, autoReEngage=nil, uiKeybind=nil, acBypassTimer=nil,
     meteorTimer=nil, meteorAdded=nil, meteorTimerAdded=nil, meteorTimerRemoved=nil,
+    infiniteZoom=nil,
 }
 local toggleStates = {
     AutoLaunchCycle=false, AutoPerfectLaunch=false, AutoBuyBurger=false,
@@ -1665,19 +1666,18 @@ local function buildViewerGui(playerName,top)
     makeRow("Move 2:",attr("SignatureMove_2"),Color3.fromRGB(160,160,180),Color3.fromRGB(100,200,255),y) y+=20
     makeRow("Move 3:",attr("SignatureMove_3"),Color3.fromRGB(160,160,180),Color3.fromRGB(100,200,255),y) y+=22
     makeDivider(y) y+=4
+    local rawType = top:GetAttribute("Type") or top:GetAttribute("Style") or "?"
+    local typeStr = tostring(rawType)
+    local typeDisplayColor
+    if typeStr:lower():find("attack") then typeDisplayColor = Color3.fromRGB(255,60,60)
+    elseif typeStr:lower():find("stamina") then typeDisplayColor = Color3.fromRGB(255,200,0)
+    elseif typeStr:lower():find("defense") then typeDisplayColor = Color3.fromRGB(80,200,80)
+    elseif typeStr:lower():find("balance") then typeDisplayColor = Color3.fromRGB(120,80,200)
+    else typeDisplayColor = Color3.fromRGB(200,200,200) end
+    makeRow("Type:",typeStr,Color3.fromRGB(160,160,180),typeDisplayColor,y) y+=20
     makeRow("ATK:",attr("Attack"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,80,80),y) y+=20
     makeRow("DEF:",attr("Defense"),Color3.fromRGB(160,160,180),Color3.fromRGB(80,220,80),y) y+=20
-    makeRow("STA:",attr("Stamina"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,200,0),y) y+=20
-    local typeMap2={Attack="Rush",Stamina="Focused",Defense="Bunker",Balance="Wobble",Standard="Standard"}
-    local styleRaw=top:GetAttribute("LaunchType") or top:GetAttribute("Type") or top:GetAttribute("Style") or "?"
-    local styleDisplay=typeMap2[tostring(styleRaw)] or tostring(styleRaw)
-    local styleRowColor
-    if styleDisplay:lower():find("rush") or styleDisplay:lower():find("attack") then styleRowColor=Color3.fromRGB(255,60,60)
-    elseif styleDisplay:lower():find("focus") or styleDisplay:lower():find("stamina") then styleRowColor=Color3.fromRGB(255,215,0)
-    elseif styleDisplay:lower():find("bunker") or styleDisplay:lower():find("defense") then styleRowColor=Color3.fromRGB(60,200,80)
-    elseif styleDisplay:lower():find("wobble") or styleDisplay:lower():find("balance") then styleRowColor=Color3.fromRGB(180,80,255)
-    else styleRowColor=Color3.fromRGB(200,200,200) end
-    makeRow("Style:",styleDisplay,Color3.fromRGB(160,160,180),styleRowColor,y) y+=22
+    makeRow("STA:",attr("Stamina"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,200,0),y) y+=22
     makeDivider(y) y+=4
     local rpmLabel=Instance.new("TextLabel") rpmLabel.BackgroundTransparency=1 rpmLabel.Size=UDim2.new(0.32,0,0,18) rpmLabel.Position=UDim2.new(0,0,0,y) rpmLabel.Font=Enum.Font.GothamBold rpmLabel.TextSize=11 rpmLabel.TextColor3=Color3.fromRGB(160,160,180) rpmLabel.TextXAlignment=Enum.TextXAlignment.Left rpmLabel.Text="RPM:" rpmLabel.Parent=content
     local rpmValLabel=Instance.new("TextLabel") rpmValLabel.Name="RPMVal" rpmValLabel.BackgroundTransparency=1 rpmValLabel.Size=UDim2.new(0.38,0,0,18) rpmValLabel.Position=UDim2.new(0.32,0,0,y) rpmValLabel.Font=Enum.Font.GothamBold rpmValLabel.TextSize=11 rpmValLabel.TextColor3=Color3.fromRGB(0,200,255) rpmValLabel.TextXAlignment=Enum.TextXAlignment.Left rpmValLabel.Text="..." rpmValLabel.Parent=content
@@ -2011,6 +2011,26 @@ MiscLeft:AddSlider('JumpPower',{Text='Jump Power',Min=50,Max=150,Default=50,Roun
 end})
 MiscLeft:AddToggle('Noclip',{Text='Noclip',Default=false,Callback=function(value)
     if value then startNoclip() Notify("Noclip","Enabled!",2) else stopNoclip() Notify("Noclip","Disabled.",2) end
+end})
+MiscLeft:AddToggle('InfiniteZoom',{Text='Infinite Zoom',Default=false,Callback=function(value)
+    if value then
+        local camera = workspace.CurrentCamera
+        camera.FieldOfView = 70
+        local minZoom = LocalPlayer.CameraMinZoomDistance
+        local maxZoom = LocalPlayer.CameraMaxZoomDistance
+        LocalPlayer.CameraMinZoomDistance = 0.5
+        LocalPlayer.CameraMaxZoomDistance = 500
+        Notify("Infinite Zoom","Enabled! Scroll to zoom.",2)
+        connections.infiniteZoom = RunService.Heartbeat:Connect(function()
+            LocalPlayer.CameraMinZoomDistance = 0.5
+            LocalPlayer.CameraMaxZoomDistance = 500
+        end)
+    else
+        if connections.infiniteZoom then connections.infiniteZoom:Disconnect() connections.infiniteZoom=nil end
+        LocalPlayer.CameraMinZoomDistance = 0.5
+        LocalPlayer.CameraMaxZoomDistance = 400
+        Notify("Infinite Zoom","Disabled.",2)
+    end
 end})
 local function onAntiAFK(value)
     toggleStates.AntiAFK=value
