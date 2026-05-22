@@ -296,8 +296,9 @@ local function startNoclip()
     if connections.noclip then connections.noclip:Disconnect() end
     connections.noclip = RunService.Stepped:Connect(function()
         local char = LocalPlayer.Character if not char then return end
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if hrp then hrp.CanCollide = false end
+        for _,part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then part.CanCollide=false end
+        end
     end)
 end
 local function stopNoclip()
@@ -1714,6 +1715,45 @@ local function destroyViewerGui()
     local old=playerGui:FindFirstChild("PlayerTopViewerGui") if old then old:Destroy() end
 end
 
+local PART_MODE_DISPLAY = {
+    ["Upper"]   = {["1"]="Blades On",  ["2"]="Blades Off",  [1]="Blades On",  [2]="Blades Off"},
+    ["Shift"]   = {["1"]="High",       ["2"]="Low",         [1]="High",       [2]="Low"},
+    ["Locking"] = {["1"]="Attack",     ["2"]="Defense",     [1]="Attack",     [2]="Defense"},
+    ["Talon"]   = {["1"]="Unlocked",   ["2"]="Locked",      [1]="Unlocked",   [2]="Locked"},
+    ["Dire"]    = {["1"]="Defense",    ["2"]="Counter",     [1]="Defense",    [2]="Counter"},
+    ["Shock"]   = {["1"]="Assault",    ["2"]="Barrage",     [1]="Assault",    [2]="Barrage"},
+    ["Radiant"] = {["1"]="Stamina",    ["2"]="Attack",      [1]="Stamina",    [2]="Attack"},
+}
+
+local PART_MODE_ATTRS = {"BeltMode","BodyMode","Mode","PartMode","CurrentMode","ActiveMode","ModeState"}
+
+local function getTopLevelMode(top, partName)
+    if not top or not partName then return nil end
+    local attrName = partName.."Mode" -- e.g. "BeltMode", "BodyMode"
+    local v = top:GetAttribute(attrName)
+    if v ~= nil then return tostring(v) end
+    return nil
+end
+
+local function getPartModeDisplay(part, baseName)
+    if not part or not baseName then return nil end
+    -- Find the mode attribute value
+    local rawVal=nil
+    for _,attr in ipairs(PART_MODE_ATTRS) do
+        local v=part:GetAttribute(attr)
+        if v~=nil then rawVal=tostring(v) break end
+    end
+    if not rawVal then return nil end
+    -- Find matching display table
+    for partKey,modeMap in pairs(PART_MODE_DISPLAY) do
+        if baseName:lower():find(partKey:lower(),1,true) then
+            local display=modeMap[rawVal]
+            if display then return display end
+        end
+    end
+    return nil
+end
+
 local function buildViewerGui(playerName,top)
     destroyViewerGui()
     local sg=Instance.new("ScreenGui")
@@ -1721,7 +1761,7 @@ local function buildViewerGui(playerName,top)
     viewer.gui=sg
     local frame=Instance.new("Frame")
     frame.BackgroundColor3=Color3.fromRGB(10,10,20) frame.BackgroundTransparency=0.15
-    frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,440)  -- Increased height for passion bars
+    frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,420)  -- Increased height for passion bars
     frame.Position=UDim2.new(1,-295,0.5,-220) frame.Parent=sg
     Instance.new("UICorner",frame).CornerRadius=UDim.new(0,8)
     local dragging,dragStart,startPos=false,nil,nil
@@ -1752,11 +1792,8 @@ local function buildViewerGui(playerName,top)
     titleLabel.TextSize=14 titleLabel.TextColor3=Color3.fromRGB(220,220,255)
     titleLabel.TextXAlignment=Enum.TextXAlignment.Left titleLabel.TextStrokeTransparency=0.5
     titleLabel.TextStrokeColor3=Color3.fromRGB(0,0,0)
-    local function toTitleCase(s)
-        return (s:gsub("(%a)([%w_']*)", function(a,b) return a:upper()..b:lower() end))
-    end
-    local displayName=(playerName=="Waiting for beyblade..." or playerName=="Waiting for match...") and playerName or toTitleCase(playerName)
-    local titleSuffix=(playerName=="Waiting for beyblade...") and "" or "'s Top"
+    local displayName=playerName
+    local titleSuffix=(playerName=="Waiting for beyblade..." or playerName=="Waiting for match...") and "" or "'s Top"
     titleLabel.Text="🔍 "..(displayName or "?")..titleSuffix titleLabel.Parent=titleBg
     local closeBtn=Instance.new("TextButton")
     closeBtn.BackgroundColor3=Color3.fromRGB(180,40,40) closeBtn.BackgroundTransparency=0.2
@@ -1786,6 +1823,69 @@ local function buildViewerGui(playerName,top)
         return
     end
     local function attr(a) local v=top:GetAttribute(a) return v~=nil and tostring(v) or "?" end
+    local function getPartMode(part)
+        if not part then return nil end
+        -- Common attribute names the game might use for mode
+        local modeAttrs={"Mode","PartMode","CurrentMode","State","ModeState","ActiveMode","Selected"}
+        for _,attr in ipairs(modeAttrs) do
+            local v=part:GetAttribute(attr)
+            if v and tostring(v)~="" and tostring(v)~="nil" then return tostring(v) end
+        end
+        -- Check children for StringValues that look like mode indicators
+        for _,child in ipairs(part:GetChildren()) do
+            if child:IsA("StringValue") and (child.Name=="Mode" or child.Name=="PartMode" or child.Name=="CurrentMode" or child.Name=="ActiveMode") then
+                if child.Value~="" then return child.Value end
+            end
+            if child:IsA("BoolValue") then
+                -- e.g. "BladesOn" = true means Blades On mode
+                local n=child.Name:lower()
+                if n:find("on") or n:find("off") or n:find("mode") or n:find("lock") or n:find("active") then
+                    return child.Name.."="..(child.Value and "true" or "false")
+                end
+            end
+        end
+        return nil
+    end
+
+    -- Maps raw mode attribute values to display strings per part name
+    local PART_MODE_DISPLAY = {
+        -- Belts
+        ["Upper"]   = {["1"]="Blades On", ["2"]="Blades Off", [1]="Blades On", [2]="Blades Off", ["true"]="Blades On", ["false"]="Blades Off"},
+        ["Shift"]   = {["1"]="High",      ["2"]="Low",        [1]="High",      [2]="Low"},
+        ["Locking"] = {["1"]="Attack",    ["2"]="Defense",    [1]="Attack",    [2]="Defense"},
+        ["Talon"]   = {["1"]="Unlocked",  ["2"]="Locked",     [1]="Unlocked",  [2]="Locked",  ["true"]="Unlocked", ["false"]="Locked"},
+        -- Bodies
+        ["Dire"]    = {["1"]="Defense",   ["2"]="Counter",    [1]="Defense",   [2]="Counter"},
+        ["Shock"]   = {["1"]="Assault",   ["2"]="Barrage",    [1]="Assault",   [2]="Barrage"},
+        ["Radiant"] = {["1"]="Stamina",   ["2"]="Attack",     [1]="Stamina",   [2]="Attack"},
+    }
+
+    local function resolveMode(partInstanceName, rawMode)
+        if not rawMode then return nil end
+        -- Try to find a matching display table by checking if partInstanceName contains a known key
+        for partKey, modeMap in pairs(PART_MODE_DISPLAY) do
+            if partInstanceName:lower():find(partKey:lower(), 1, true) then
+                local display=modeMap[rawMode]
+                if display then return display end
+                -- Try case-insensitive
+                for k,v in pairs(modeMap) do
+                    if k:lower()==rawMode:lower() then return v end
+                end
+                -- BoolValue format: "BladesOn=true"
+                if rawMode:find("=") then
+                    local boolVal=rawMode:match("=(.+)$")
+                    if boolVal then
+                        local d=modeMap[boolVal] or modeMap[boolVal:lower()]
+                        if d then return d end
+                    end
+                end
+                -- Return raw if we know this part has modes but can't map it
+                return rawMode
+            end
+        end
+        return nil
+    end
+
     local function partAttr(pName)
         local part=top:FindFirstChild(pName) if not part then return "?" end
         -- Try Name attribute first (player tops)
@@ -1794,22 +1894,22 @@ local function buildViewerGui(playerName,top)
         -- Try instance name (NPC tops store name as instance name)
         local iname=part.Name
         if iname and iname~=pName and iname~="" then return iname end
-        -- Try every attribute — scan for any string that looks like a part name
+        -- Try every attribute
         for attrName,attrVal in pairs(part:GetAttributes()) do
             local v=tostring(attrVal)
             local al=attrName:lower()
-            if v~="" and v~="?" and al~="id" and al~="rarity" and al~="health" 
-            and al~="maxhealth" and al~="attack" and al~="defense" and al~="stamina" then
+            if v~="" and v~="?" and al~="id" and al~="rarity" and al~="health"
+            and al~="maxhealth" and al~="attack" and al~="defense" and al~="stamina"
+            and al~="mode" and al~="partmode" and al~="currentmode" then
                 return v
             end
         end
-        -- Check children of the part for a StringValue named "Name" or similar
+        -- Check children StringValues
         for _,child in ipairs(part:GetChildren()) do
             if child:IsA("StringValue") and (child.Name=="Name" or child.Name=="PartName") then
                 if child.Value~="" and child.Value~="?" then return child.Value end
             end
         end
-        -- Wait briefly for replication and retry once
         task.wait(0.3)
         local n2=part:GetAttribute("Name")
         if n2 and tostring(n2)~="" and tostring(n2)~="?" then return tostring(n2) end
@@ -1817,12 +1917,30 @@ local function buildViewerGui(playerName,top)
         if iname2 and iname2~=pName and iname2~="" then return iname2 end
         return "?"
     end
-    local y=0
+
+    local function partAttrWithMode(pName)
+        local part=top:FindFirstChild(pName) if not part then return "?" end
+        local baseName=partAttr(pName)
+        if baseName=="?" then return "?" end
+        -- Check top-level attribute first (e.g. BeltMode, BodyMode stored on the top itself)
+        local rawMode
+        local topLevelAttr = pName.."Mode"
+        local topLevelVal = top:GetAttribute(topLevelAttr)
+        if topLevelVal ~= nil then rawMode = tostring(topLevelVal) end
+        -- Fall back to checking the part's own attributes
+        if not rawMode then rawMode = getPartMode(part) end
+        if rawMode then
+            local display = resolveMode(baseName, rawMode)
+            if display then return baseName.." ("..display..")" end
+        end
+        return baseName
+    end
+        local y=0
     makeRow("Spirit:",attr("Spirit"),Color3.fromRGB(160,160,180),Color3.fromRGB(180,120,255),y) y+=22
     makeDivider(y) y+=4
     makeRow("Crown:",partAttr("Crown"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,215,0),y) y+=20
-    makeRow("Body:",partAttr("Body"),Color3.fromRGB(160,160,180),Color3.fromRGB(160,220,160),y) y+=20
-    makeRow("Belt:",partAttr("Belt"),Color3.fromRGB(160,160,180),Color3.fromRGB(205,133,63),y) y+=20
+    makeRow("Body:",partAttrWithMode("Body"),Color3.fromRGB(160,160,180),Color3.fromRGB(160,220,160),y) y+=20
+    makeRow("Belt:",partAttrWithMode("Belt"),Color3.fromRGB(160,160,180),Color3.fromRGB(205,133,63),y) y+=20
     makeRow("Point:",partAttr("Point"),Color3.fromRGB(160,160,180),Color3.fromRGB(220,220,220),y) y+=22
     makeDivider(y) y+=4
 
@@ -2483,6 +2601,25 @@ ESPViewer:AddToggle('AutoOpponentViewer',{
 -- ── Misc Tab ──────────────────────────────────────────────────────────────────
 local MiscLeft  = Tabs.Misc:AddLeftGroupbox('Character')
 local MiscRight = Tabs.Misc:AddRightGroupbox('Server')
+
+MiscLeft:AddButton('Debug Belt Attrs',function()
+    local top=getMyTop()
+    if not top then Notify("Debug","No top in workspace!",3) return end
+    local belt=top:FindFirstChild("Belt")
+    if not belt then Notify("Debug","No Belt found!",3) return end
+    print("=== BELT PART INFO ===")
+    print("Instance Name: "..belt.Name)
+    for k,v in pairs(belt:GetAttributes()) do
+        print("  ATTR: ["..k.."] = "..tostring(v))
+    end
+    for _,child in ipairs(belt:GetChildren()) do
+        print("  CHILD: "..child.ClassName.." '"..child.Name.."'")
+        if child:IsA("StringValue") or child:IsA("BoolValue") or child:IsA("IntValue") then
+            print("    Value = "..tostring(child.Value))
+        end
+    end
+    Notify("Debug","Check F9 console for belt attrs!",5)
+end)
 
 MiscLeft:AddButton('Debug My Top',function()
     local top=getMyTop()
