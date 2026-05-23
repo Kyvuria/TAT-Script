@@ -888,7 +888,10 @@ local function onAutoStateKeeper(value)
     if value then
         connections.stateKeeper=RunService.Heartbeat:Connect(function()
             if stateKeeperState.isFixing then return end
+            if autoSwitchState.enabled then return end
+            if autoStyleState.isSwitching then return end
             local myTop=workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId)) if not myTop then return end
+            if myTop:GetAttribute("IsStadiumFight") ~= true then return end
             local ok,label=pcall(function() return playerGui.HUD["Top UI"].Info.Top.State end)
             if not ok or not label then return end
             local state=label.Text
@@ -1013,6 +1016,11 @@ local function startAutoSwitchState()
                 autoSwitchState.hasSwitched = false
                 autoSwitchState.wasInBattle = false
             end
+            return
+        end
+        if myTop:GetAttribute("IsStadiumFight") ~= true then
+            autoSwitchState.hasSwitched = false
+            autoSwitchState.wasInBattle = false
             return
         end
         local health = myTop:GetAttribute("Health") or 0
@@ -1239,6 +1247,19 @@ local function switchToStyle(targetStyle)
         local maxPresses = 10
         local pressed = 0
         while pressed < maxPresses do
+            if not autoStyleState.enabled then break end
+            local myId = tostring(LocalPlayer.UserId)
+            local myTop = workspace.Tops:FindFirstChild(myId)
+            -- Only press G in tournament (IsStadiumFight + VictoryCents 0 + no 1v1 Barrier)
+            if myTop ~= nil then
+                if myTop:GetAttribute("IsStadiumFight") ~= true then break end
+                if myTop:GetAttribute("VictoryCents") ~= 0 then break end
+                local has1v1Barrier = false
+                for _, part in ipairs(myTop:GetDescendants()) do
+                    if part.Name == "1v1 Barrier" then has1v1Barrier = true break end
+                end
+                if has1v1Barrier then break end
+            end
             VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.G, false, game)
             task.wait(0.05)
             VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.G, false, game)
@@ -1278,6 +1299,7 @@ local function startAutoStyle()
 
     local lastDetectedOpponent = nil
     local checkInterval = 0
+    local wasInFight = false
 
     autoStyleConn = RunService.Heartbeat:Connect(function(dt)
         if not autoStyleState.enabled then return end
@@ -1286,8 +1308,42 @@ local function startAutoStyle()
         if checkInterval < 1 then return end
         checkInterval = 0
 
+        local myId = tostring(LocalPlayer.UserId)
+        local myTop = workspace.Tops:FindFirstChild(myId)
+
+        -- Bey is back in hand after a fight — reset style only after a delay
+        -- to avoid firing during brief tourney recalls between rounds
+        if myTop == nil and wasInFight then
+            if not autoStyleState._resetTimer then
+                autoStyleState._resetTimer = tick()
+            end
+            if tick() - autoStyleState._resetTimer < 8 then
+                return
+            end
+            autoStyleState._resetTimer = nil
+            wasInFight = false
+            lastDetectedOpponent = nil
+            autoStyleState.hasSwitched = false
+            switchToStyle(autoStyleState.normalStyle)
+            return
+        end
+        autoStyleState._resetTimer = nil
+
+        -- Only run in tournament matches
+        -- Tournament = IsStadiumFight true, no 1v1 Barrier, VictoryCents = 0
+        if myTop ~= nil then
+            if myTop:GetAttribute("IsStadiumFight") ~= true then return end
+            if myTop:GetAttribute("VictoryCents") ~= 0 then return end
+            local has1v1Barrier = false
+            for _, part in ipairs(myTop:GetDescendants()) do
+                if part.Name == "1v1 Barrier" then has1v1Barrier = true break end
+            end
+            if has1v1Barrier then return end
+        end
+
         local oppName = nil
-        local oppTop = viewer.currentTop
+        -- Prioritise auto viewer's live tracked opponent when it's running
+        local oppTop = viewer.autoEnabled and viewer.currentTop or viewer.currentTop
         if oppTop and oppTop.Parent then
             local uid = tonumber(oppTop.Name)
             if uid then
@@ -1348,6 +1404,7 @@ local function startAutoStyle()
             end
             return
         end
+        wasInFight = true
 
         if oppName == lastDetectedOpponent and autoStyleState.hasSwitched then return end
 
