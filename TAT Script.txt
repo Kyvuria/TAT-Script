@@ -3043,10 +3043,69 @@ setupUIKeybind()
 pcall(function() ThemeManager:SetLibrary(Library) ThemeManager:AttachToTab(Tabs.Config) end)
 local ok2,err2=pcall(function()
     SaveManager:SetLibrary(Library) SaveManager:SetFolder('RequiemTAT')
-    SaveManager:SetIgnoreIndexes({'UIToggleKeybind','PreferredState'})
+    SaveManager:SetIgnoreIndexes({'UIToggleKeybind','PreferredState',
+    'AutoSwitch_Enable_Attack','AutoSwitch_Enable_Stamina','AutoSwitch_Enable_Defense','AutoSwitch_Enable_Balance',
+    'AutoSwitch_Threshold_Attack','AutoSwitch_Threshold_Stamina','AutoSwitch_Threshold_Defense','AutoSwitch_Threshold_Balance',
+    'AutoSwitchBlacklist','AutoSwitchState','AutoSwitchTargetState'
+})
     SaveManager:BuildConfigSection(Tabs.Config)
 end)
 if not ok2 then warn("SaveManager error: "..tostring(err2)) end
+
+-- Manual save/load for Auto Switch State
+local _origSave = SaveManager.Save
+function SaveManager:Save(name)
+    local result = _origSave(self, name)
+    local configs = loadAllConfigs()
+    if not configs[name] then configs[name] = {} end
+    configs[name].autoSwitchExtra = {
+        enabled    = autoSwitchState.enabled,
+        switchTo   = autoSwitchState.switchTo,
+        blacklist  = autoSwitchState.blacklist,
+        typeConfig = {
+            Attack  = { active = autoSwitchState.typeConfig.Attack.active,  threshold = autoSwitchState.typeConfig.Attack.threshold },
+            Stamina = { active = autoSwitchState.typeConfig.Stamina.active, threshold = autoSwitchState.typeConfig.Stamina.threshold },
+            Defense = { active = autoSwitchState.typeConfig.Defense.active, threshold = autoSwitchState.typeConfig.Defense.threshold },
+            Balance = { active = autoSwitchState.typeConfig.Balance.active, threshold = autoSwitchState.typeConfig.Balance.threshold },
+        },
+    }
+    saveAllConfigs(configs)
+    return result
+end
+
+local _origLoad = SaveManager.Load
+function SaveManager:Load(name)
+    local result = _origLoad(self, name)
+    local configs = loadAllConfigs()
+    local extra = configs[name] and configs[name].autoSwitchExtra
+    if extra then
+        if extra.switchTo then
+            autoSwitchState.switchTo = extra.switchTo
+            pcall(function() Options['AutoSwitchTargetState']:SetValue(extra.switchTo) end)
+        end
+        if extra.blacklist then
+            autoSwitchState.blacklist = extra.blacklist
+            pcall(function() Options['AutoSwitchBlacklist']:SetValue(extra.blacklist) end)
+        end
+        if extra.typeConfig then
+            for _, typeName in ipairs({"Attack","Stamina","Defense","Balance"}) do
+                local tc = extra.typeConfig[typeName]
+                if tc then
+                    autoSwitchState.typeConfig[typeName].active    = tc.active
+                    autoSwitchState.typeConfig[typeName].threshold = tc.threshold
+                    pcall(function() Toggles['AutoSwitch_Enable_'..typeName]:SetValue(tc.active) end)
+                    pcall(function() Options['AutoSwitch_Threshold_'..typeName]:SetValue(math.floor(tc.threshold * 100)) end)
+                end
+            end
+        end
+        if extra.enabled ~= nil then
+            autoSwitchState.enabled = extra.enabled
+            pcall(function() Toggles['AutoSwitchState']:SetValue(extra.enabled) end)
+            if extra.enabled then startAutoSwitchState() end
+        end
+    end
+    return result
+end
 
 task.spawn(function()
     task.wait(3)
