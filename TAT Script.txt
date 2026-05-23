@@ -71,7 +71,7 @@ local Tabs = {
 }
 
 local function Notify(title, content, duration)
-    Library:Notify(title .. '\n' .. content, duration or 3)
+    -- Library:Notify(title .. '\n' .. content, duration or 3)
 end
 
 -- ── Services ──────────────────────────────────────────────────────────────────
@@ -920,17 +920,20 @@ end})
 -- ── Auto Switch State At RPM % ────────────────────────────────────────────────
 local autoSwitchState = {
     enabled = false,
-    threshold = 0.100,       -- 100% default
-    switchTo = "Attacking", -- state to switch TO when threshold is crossed
-    blacklist = {},         -- set of type strings to ignore
-    hasSwitched = false,    -- one-shot per match: don't keep re-triggering
-    wasInBattle = false,    -- tracks if we entered a battle this session
+    switchTo = "Attacking",
+    hasSwitched = false,
+    wasInBattle = false,
+    typeConfig = {
+        Attack   = { active = false, threshold = 1.00 },
+        Stamina  = { active = false, threshold = 1.00 },
+        Defense  = { active = false, threshold = 1.00 },
+        Balance  = { active = false, threshold = 1.00 },
+    },
+    blacklist = {},
 }
 
 local function getOpponentTypeForSwitch()
-    -- Primary: use the auto viewer's locked-in opponent top
     local oppTop = viewer.currentTop
-    -- Fallback: scan workspace.Tops for any non-self top with health
     if not oppTop or not oppTop.Parent then
         local myId = tostring(LocalPlayer.UserId)
         local myTop = workspace.Tops:FindFirstChild(myId)
@@ -967,20 +970,14 @@ local function getCurrentStateLabel()
 end
 
 local function pressGToState(targetState)
-    -- Figure out current state first
     local current = getCurrentStateLabel()
     if not current then return end
-    -- State cycle order: Attacking -> Guarding -> Attacking (G toggles)
-    -- Pressing G once: Attacking->Guarding, Guarding->Attacking
-    -- So we just need to know if we're already there
-    if current:find(targetState) then return end -- already in target state
-    -- Press G once to toggle
+    if current:find(targetState) then return end
     task.spawn(function()
         VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.G, false, game)
         task.wait(0.05)
         VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.G, false, game)
         task.wait(0.35)
-        -- Verify and press again if needed (sometimes first press misses)
         local newState = getCurrentStateLabel()
         if newState and not newState:find(targetState) then
             VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.G, false, game)
@@ -988,6 +985,17 @@ local function pressGToState(targetState)
             VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.G, false, game)
         end
     end)
+end
+
+local function resolveOpponentType(rawType)
+    if not rawType or rawType == "" or rawType == "?" then return nil end
+    local lower = rawType:lower()
+    if lower:find("attack") then return "Attack"
+    elseif lower:find("stamina") then return "Stamina"
+    elseif lower:find("defense") or lower:find("defence") then return "Defense"
+    elseif lower:find("balance") then return "Balance"
+    end
+    return nil
 end
 
 local autoSwitchConn = nil
@@ -1001,7 +1009,6 @@ local function startAutoSwitchState()
         local myId = tostring(LocalPlayer.UserId)
         local myTop = workspace.Tops:FindFirstChild(myId)
         if not myTop then
-            -- Top left arena — reset so next match works
             if autoSwitchState.wasInBattle then
                 autoSwitchState.hasSwitched = false
                 autoSwitchState.wasInBattle = false
@@ -1017,33 +1024,27 @@ local function startAutoSwitchState()
             end
             return
         end
-        -- We're in battle
         autoSwitchState.wasInBattle = true
-        -- Already switched this match — don't trigger again until next match
         if autoSwitchState.hasSwitched then return end
-        local myRPMPct = health / maxHealth  -- Health is proportional to RPM
-        -- Only trigger when RPM drops TO or BELOW the threshold (falling through it)
-        if myRPMPct > autoSwitchState.threshold then return end
-        -- Check opponent type against blacklist
-        local oppType = getOpponentTypeForSwitch()
-        if oppType and oppType ~= "" and oppType ~= "?" then
-            -- Normalize: trim and lower for comparison
-            local oppLower = oppType:lower():gsub("%s+", "")
-            for blacklisted, _ in pairs(autoSwitchState.blacklist) do
-                local bLower = blacklisted:lower():gsub("%s+", "")
-                if oppLower:find(bLower, 1, true) or bLower:find(oppLower, 1, true) then
-                    -- Opponent type is blacklisted — don't switch, mark as "handled" for this match
-                    autoSwitchState.hasSwitched = true
-                    Notify("Auto Switch State", "Skipped — opponent is "..oppType.." (blacklisted)", 4)
-                    return
-                end
-            end
+
+        local myRPMPct = health / maxHealth
+
+        local rawType = getOpponentTypeForSwitch()
+        local oppType = resolveOpponentType(rawType)
+
+        if oppType then
+            -- Check blacklist first
+            if autoSwitchState.blacklist[oppType] then return end
+            local cfg = autoSwitchState.typeConfig[oppType]
+            if not cfg or not cfg.active then return end
+            if myRPMPct > cfg.threshold then return end
+            autoSwitchState.hasSwitched = true
+            local pctDisplay = math.floor(myRPMPct * 100)
+            Notify("Auto Switch State", "vs "..oppType.." → switching to "..autoSwitchState.switchTo.." at "..pctDisplay.."% RPM", 4)
+            pressGToState(autoSwitchState.switchTo)
+        else
+            return
         end
-        -- Switch!
-        autoSwitchState.hasSwitched = true
-        local pctDisplay = math.floor(myRPMPct * 100)
-        Notify("Auto Switch State", "Switching to "..autoSwitchState.switchTo.." at "..pctDisplay.."% RPM", 4)
-        pressGToState(autoSwitchState.switchTo)
     end)
 end
 
@@ -1053,6 +1054,9 @@ local function stopAutoSwitchState()
     autoSwitchState.wasInBattle = false
 end
 
+-- gap before this section
+MainLeft:AddLabel(' ')
+
 MainLeft:AddToggle('AutoSwitchState', {
     Text = 'Auto Switch State At RPM %',
     Default = false,
@@ -1060,22 +1064,11 @@ MainLeft:AddToggle('AutoSwitchState', {
         autoSwitchState.enabled = value
         if value then
             startAutoSwitchState()
-            Notify("Auto Switch State", "Enabled! Will switch to "..autoSwitchState.switchTo.." at "..math.floor(autoSwitchState.threshold*100).."%", 4)
+            Notify("Auto Switch State", "Enabled! Per-type thresholds active.", 4)
         else
             stopAutoSwitchState()
             Notify("Auto Switch State", "Disabled.", 3)
         end
-    end,
-})
-
-MainLeft:AddSlider('AutoSwitchRPMThreshold', {
-    Text = 'Switch At RPM %',
-    Min = 0, Max = 110, Default = 100,
-    Rounding = 0, Suffix = '%',
-    Callback = function(value)
-        autoSwitchState.threshold = value / 100
-        -- Reset hasSwitched so a threshold change mid-match can re-arm
-        autoSwitchState.hasSwitched = false
     end,
 })
 
@@ -1089,19 +1082,43 @@ MainLeft:AddDropdown('AutoSwitchTargetState', {
     end,
 })
 
-MainLeft:AddDropdown('AutoSwitchTypeBlacklist', {
-    Text = 'Type Blacklist (Skip Type Switch)',
+local TYPE_LIST = {"Attack", "Stamina", "Defense", "Balance"}
+
+for _, typeName in ipairs(TYPE_LIST) do
+    MainLeft:AddToggle('AutoSwitch_Enable_'..typeName, {
+        Text = typeName,
+        Default = false,
+        Callback = function(value)
+            autoSwitchState.typeConfig[typeName].active = value
+            autoSwitchState.hasSwitched = false
+        end,
+    })
+
+    MainLeft:AddSlider('AutoSwitch_Threshold_'..typeName, {
+        Text = 'Switch At RPM %',
+        Min = 0, Max = 110,
+        Default = 100,
+        Rounding = 0, Suffix = '%',
+        Callback = function(value)
+            autoSwitchState.typeConfig[typeName].threshold = value / 100
+            autoSwitchState.hasSwitched = false
+        end,
+    })
+end
+
+MainLeft:AddDropdown('AutoSwitchBlacklist', {
+    Text = 'Type Blacklist (Prevents Switch)',
     Values = {'Attack', 'Defense', 'Stamina', 'Balance'},
     Default = {},
     Multi = true,
     Callback = function(selectedTable)
-        -- selectedTable is a dict of {TypeName=true/false} in Linoria multi-dropdowns
         autoSwitchState.blacklist = {}
         for typeName, isSelected in pairs(selectedTable) do
             if isSelected then
                 autoSwitchState.blacklist[typeName] = true
             end
         end
+        autoSwitchState.hasSwitched = false
     end,
 })
 
@@ -2875,7 +2892,7 @@ ESPViewer:AddToggle('AutoOpponentViewer',{
         if value then
             startAutoOpponentViewer()
             if not viewer.gui then buildViewerGui("Waiting for beyblade...",nil) end
-            Notify("Auto Viewer","On! Will auto-show opponent's top in 1v1s/tournement.",4)
+            Notify("Auto Viewer","On! Will auto-show opponent's top in 1v1s/tournament.",4)
         else
             stopAutoOpponentViewer() destroyViewerGui() Notify("Auto Viewer","Off.",3)
         end
