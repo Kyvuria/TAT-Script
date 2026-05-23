@@ -913,7 +913,7 @@ local function onAutoStateKeeper(value)
     end
 end
 toggleCallbacks["AutoStateKeeper"]=onAutoStateKeeper
-MainLeft:AddToggle('AutoStateKeeper',{Text='Auto State Keeper',Default=startFlags.AutoStateKeeper,Callback=onAutoStateKeeper})
+MainLeft:AddToggle('AutoStateKeeper',{Text='Auto State Switcher On Idle',Default=startFlags.AutoStateKeeper,Callback=onAutoStateKeeper})
 if startFlags.AutoStateKeeper then onAutoStateKeeper(true) end
 MainLeft:AddDropdown('PreferredState',{Text='Preferred State',Values={'Attacking','Guarding'},Default=1,Callback=function(value)
     stateKeeperState.preferredState=value
