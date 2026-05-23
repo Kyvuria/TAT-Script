@@ -1486,6 +1486,50 @@ local function onTopInspector(value)
     else teardownTopInspectorListeners() clearAllTopBillboards() Notify("Top Inspector","Disabled.",3) end
 end
 ESPLeft:AddToggle('TopInspector',{Text='Top ESP',Default=false,Callback=onTopInspector})
+ESPLeft:AddToggle('HideOwnTop',{Text='Hide Own Top',Default=false,Callback=function(value)
+    local myId=tostring(LocalPlayer.UserId)
+    local myTop=workspace.Tops:FindFirstChild(myId)
+    if myTop then
+        local bb=myTop:FindFirstChildWhichIsA("BasePart") and myTop:FindFirstChildWhichIsA("BasePart"):FindFirstChild("TopInspectorBB")
+        -- hide/show billboard
+        if topInspector.bbCache[myTop] then
+            if topInspector.bbCache[myTop].bb then
+                topInspector.bbCache[myTop].bb.Enabled=not value
+            end
+            if topInspector.bbCache[myTop].hl then
+                topInspector.bbCache[myTop].hl.Enabled=not value
+            end
+        end
+    end
+    -- watch for top changes
+    if value then
+        if not _G._hideOwnTopConn then
+            _G._hideOwnTopConn=workspace.Tops.ChildAdded:Connect(function(top)
+                if top.Name~=myId then return end
+                task.wait(0.5)
+                if topInspector.bbCache[top] then
+                    if topInspector.bbCache[top].bb then topInspector.bbCache[top].bb.Enabled=false end
+                    if topInspector.bbCache[top].hl then topInspector.bbCache[top].hl.Enabled=false end
+                end
+            end)
+            _G._hideOwnTopBuildConn=RunService.Heartbeat:Connect(function()
+                local t=workspace.Tops:FindFirstChild(myId)
+                if t and topInspector.bbCache[t] then
+                    if topInspector.bbCache[t].bb and topInspector.bbCache[t].bb.Enabled then topInspector.bbCache[t].bb.Enabled=false end
+                    if topInspector.bbCache[t].hl and topInspector.bbCache[t].hl.Enabled then topInspector.bbCache[t].hl.Enabled=false end
+                end
+            end)
+        end
+    else
+        if _G._hideOwnTopConn then _G._hideOwnTopConn:Disconnect() _G._hideOwnTopConn=nil end
+        if _G._hideOwnTopBuildConn then _G._hideOwnTopBuildConn:Disconnect() _G._hideOwnTopBuildConn=nil end
+        local t=workspace.Tops:FindFirstChild(myId)
+        if t and topInspector.bbCache[t] then
+            if topInspector.bbCache[t].bb then topInspector.bbCache[t].bb.Enabled=true end
+            if topInspector.bbCache[t].hl then topInspector.bbCache[t].hl.Enabled=true end
+        end
+    end
+end})
 
 -- Trash ESP
 local function createTrashESP(part)
@@ -1637,6 +1681,7 @@ local function getTopForPlayer(playerName)
 end
 local function destroyViewerGui()
     if viewer.liveConn then viewer.liveConn:Disconnect() viewer.liveConn=nil end
+    if viewer._noTopWatchConn then viewer._noTopWatchConn:Disconnect() viewer._noTopWatchConn=nil end
     if viewer.gui then pcall(function() viewer.gui:Destroy() end) viewer.gui=nil end
     local old=playerGui:FindFirstChild("PlayerTopViewerGui") if old then old:Destroy() end
 end
@@ -1745,9 +1790,40 @@ local function buildViewerGui(playerName,top)
         local isWaiting=(playerName=="Waiting for beyblade..." or playerName=="Waiting for match...")
         local noTop=Instance.new("TextLabel") noTop.BackgroundTransparency=1 noTop.Size=UDim2.new(1,0,1,0) noTop.Font=Enum.Font.GothamBold noTop.TextSize=13
         noTop.TextColor3=isWaiting and Color3.fromRGB(140,140,160) or Color3.fromRGB(255,80,80)
-        noTop.Text=isWaiting and "Waiting for a 1v1 or\ntournament match..." or "No top found\nfor this player."
-        noTop.TextWrapped=true noTop.Parent=content
-        return
+        noTop.Text=isWaiting and "Waiting for a 1v1 or\ntournament match..." or "No top found\nfor this player.\nWaiting..."
+    noTop.TextWrapped=true noTop.Parent=content
+    if not isWaiting and playerName and playerName~="" then
+        local watchConn
+        watchConn=workspace.Tops.ChildAdded:Connect(function(newTop)
+            if viewer.autoEnabled then watchConn:Disconnect() return end
+            local uid=tonumber(newTop.Name)
+            local matchesPlayer=false
+            if uid then local p=Players:GetPlayerByUserId(uid) if p and p.Name==playerName then matchesPlayer=true end end
+            if not matchesPlayer then local ov=newTop:FindFirstChild("Owner") if ov and ov.Value and ov.Value.Name==playerName then matchesPlayer=true end end
+            if matchesPlayer then
+                watchConn:Disconnect()
+                task.wait(0.4)
+                if not viewer.autoEnabled then
+                    buildViewerGui(playerName,newTop) Notify("Top Viewer",playerName.."'s top is now in arena!",3)
+                end
+            end
+        end)
+        viewer._noTopWatchConn=watchConn
+		-- Check if top already exists right now (spawned before watcher was set up)
+        task.spawn(function()
+            for i=1,20 do
+                task.wait(0.3)
+                local existingTop=getTopForPlayer(playerName)
+                if existingTop then
+                    if viewer._noTopWatchConn then viewer._noTopWatchConn:Disconnect() viewer._noTopWatchConn=nil end
+                    buildViewerGui(playerName,existingTop)
+                    Notify("Top Viewer",playerName.."'s top is now in arena!",3)
+                    return
+                end
+            end
+        end)
+    end
+    return
     end
     local function attr(a) local v=top:GetAttribute(a) return v~=nil and tostring(v) or "?" end
     local function getPartMode(part)
@@ -2100,7 +2176,7 @@ ESPViewer:AddToggle('ShowExtraStats',{Text='Show Extra Stats',Default=false,Call
     end
     task.spawn(function()
         while value do
-            task.wait(1)
+            task.wait(0.15)
             if not playerGui:FindFirstChild("ExtraStatsGui") and not value then break end
             local top=viewer.currentTop
             local old2=playerGui:FindFirstChild("ExtraStatsGui") if old2 then old2:Destroy() end
