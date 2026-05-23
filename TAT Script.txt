@@ -1122,6 +1122,314 @@ MainLeft:AddDropdown('AutoSwitchBlacklist', {
     end,
 })
 
+-- ── Auto Switch Style ─────────────────────────────────────────────────────────
+local OPPONENT_HISTORY_FILE = "TAT_OpponentHistory.json"
+
+local opponentHistory = {}
+
+local function loadOpponentHistory()
+    local ok, data = pcall(function() return readfile(OPPONENT_HISTORY_FILE) end)
+    if not ok or not data or data == "" then return {} end
+    local ok2, parsed = pcall(function() return HttpService:JSONDecode(data) end)
+    if ok2 and type(parsed) == "table" then return parsed end
+    return {}
+end
+
+local function saveOpponentHistory()
+    pcall(function()
+        writefile(OPPONENT_HISTORY_FILE, HttpService:JSONEncode(opponentHistory))
+    end)
+end
+
+opponentHistory = loadOpponentHistory()
+
+local autoStyleState = {
+    enabled = false,
+    mode = "Normal",
+    normalStyle = "Standard",
+    hasSwitched = false,
+    isSwitching = false,
+    counterStyle = {
+        Attack  = "Standard",
+        Stamina = "Standard",
+        Defense = "Standard",
+        Balance = "Standard",
+    },
+}
+
+local styleHistoryConn = nil
+local function startOpponentHistoryTracker()
+    if styleHistoryConn then styleHistoryConn:Disconnect() styleHistoryConn = nil end
+    local myId = tostring(LocalPlayer.UserId)
+    local function recordTop(top)
+        if top.Name == myId then return end
+        local uid = tonumber(top.Name)
+        if not uid then return end
+        local p = Players:GetPlayerByUserId(uid)
+        if not p then return end
+        task.delay(1, function()
+            if not top or not top.Parent then return end
+            local rawType = top:GetAttribute("Type") or top:GetAttribute("Style") or ""
+            local resolved = resolveOpponentType(tostring(rawType))
+            if not resolved then return end
+            opponentHistory[p.Name] = { type = resolved, lastSeen = os.time() }
+            saveOpponentHistory()
+        end)
+    end
+    for _, top in ipairs(workspace.Tops:GetChildren()) do
+        task.spawn(recordTop, top)
+    end
+    styleHistoryConn = workspace.Tops.ChildAdded:Connect(function(top)
+        task.spawn(recordTop, top)
+    end)
+end
+startOpponentHistoryTracker()
+
+local function getMyCurrentStyleFromHUD()
+    local function scanForStyle(inst)
+        for _, child in ipairs(inst:GetChildren()) do
+            if child:IsA("TextLabel") and child.Visible then
+                local text = child.Text or ""
+                local styleName = text:match("^Style:%s*(.+)$")
+                if styleName then return styleName end
+            end
+            local found = scanForStyle(child)
+            if found then return found end
+        end
+        return nil
+    end
+    for _, gui in ipairs(playerGui:GetChildren()) do
+        if gui:IsA("ScreenGui") and gui.Enabled then
+            local found = scanForStyle(gui)
+            if found then return found end
+        end
+    end
+    return nil
+end
+
+local function switchToStyle(targetStyle)
+    if autoStyleState.isSwitching then return end
+    autoStyleState.isSwitching = true
+    task.spawn(function()
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then autoStyleState.isSwitching = false return end
+
+        local beyIsOut = getMyTop() ~= nil
+        if not beyIsOut then
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+            task.wait(0.05)
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+            task.wait(0.7)
+        end
+
+        local currentStyle = getMyCurrentStyleFromHUD()
+        if currentStyle == targetStyle then
+            if not beyIsOut then
+                task.wait(0.2)
+                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+                task.wait(0.05)
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+            end
+            autoStyleState.isSwitching = false
+            autoStyleState.hasSwitched = true
+            return
+        end
+
+        local maxPresses = 10
+        local pressed = 0
+        while pressed < maxPresses do
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.G, false, game)
+            task.wait(0.05)
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.G, false, game)
+            task.wait(0.2)
+            pressed += 1
+            local nowStyle = getMyCurrentStyleFromHUD()
+            if nowStyle == targetStyle then break end
+        end
+
+        if not beyIsOut then
+            task.wait(0.2)
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+            task.wait(0.05)
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+        end
+
+        autoStyleState.isSwitching = false
+        autoStyleState.hasSwitched = true
+    end)
+end
+
+local autoStyleConn = nil
+local function startAutoStyle()
+    if autoStyleConn then autoStyleConn:Disconnect() autoStyleConn = nil end
+    autoStyleState.hasSwitched = false
+
+    if autoStyleState.mode == "Normal" then
+        switchToStyle(autoStyleState.normalStyle)
+        autoStyleConn = LocalPlayer.CharacterAdded:Connect(function()
+            task.wait(1)
+            if autoStyleState.enabled and autoStyleState.mode == "Normal" then
+                switchToStyle(autoStyleState.normalStyle)
+            end
+        end)
+        return
+    end
+
+    local lastDetectedOpponent = nil
+    local checkInterval = 0
+
+    autoStyleConn = RunService.Heartbeat:Connect(function(dt)
+        if not autoStyleState.enabled then return end
+        if autoStyleState.isSwitching then return end
+        checkInterval += dt
+        if checkInterval < 1 then return end
+        checkInterval = 0
+
+        local oppName = nil
+        local oppTop = viewer.currentTop
+        if oppTop and oppTop.Parent then
+            local uid = tonumber(oppTop.Name)
+            if uid then
+                local p = Players:GetPlayerByUserId(uid)
+                if p then oppName = p.Name end
+            end
+            if not oppName then
+                local ov = oppTop:FindFirstChild("Owner")
+                if ov and ov.Value then oppName = ov.Value.Name end
+            end
+        end
+
+        if not oppName then
+            local myName = LocalPlayer.Name
+            local myDisplay = LocalPlayer.DisplayName
+            for _, gui in ipairs(playerGui:GetChildren()) do
+                if not gui:IsA("ScreenGui") or not gui.Enabled then continue end
+                local function scanLabels(inst)
+                    for _, child in ipairs(inst:GetChildren()) do
+                        if child:IsA("TextLabel") and child.Visible then
+                            local text = child.Text or ""
+                            local tl = text:lower()
+                            if tl:find(" vs ") then
+                                local left, right = tl:match("^(.-)%s+vs%s+(.+)$")
+                                if left and right then
+                                    left = left:gsub("^%s+",""):gsub("%s+$","")
+                                    right = right:gsub("^%s+",""):gsub("%s+$","")
+                                    local myL = myName:lower()
+                                    local myDL = myDisplay:lower()
+                                    local oppL
+                                    if left==myL or left==myDL or myL:find(left,1,true) or left:find(myL,1,true) then
+                                        oppL = right
+                                    elseif right==myL or right==myDL or myL:find(right,1,true) or right:find(myL,1,true) then
+                                        oppL = left
+                                    end
+                                    if oppL then
+                                        for _, p in ipairs(Players:GetPlayers()) do
+                                            if p.Name:lower()==oppL or p.DisplayName:lower()==oppL then
+                                                oppName = p.Name break
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                        scanLabels(child)
+                    end
+                end
+                scanLabels(gui)
+                if oppName then break end
+            end
+        end
+
+        if not oppName then
+            if lastDetectedOpponent ~= nil then
+                lastDetectedOpponent = nil
+                autoStyleState.hasSwitched = false
+            end
+            return
+        end
+
+        if oppName == lastDetectedOpponent and autoStyleState.hasSwitched then return end
+
+        local oppType = nil
+        if oppTop and oppTop.Parent then
+            local rawType = oppTop:GetAttribute("Type") or oppTop:GetAttribute("Style") or ""
+            oppType = resolveOpponentType(tostring(rawType))
+        end
+        if not oppType then
+            local history = opponentHistory[oppName]
+            if history then oppType = history.type end
+        end
+
+        if not oppType then return end
+
+        local targetStyle = autoStyleState.counterStyle[oppType]
+        if not targetStyle or targetStyle == "" then return end
+
+        lastDetectedOpponent = oppName
+        autoStyleState.hasSwitched = false
+        switchToStyle(targetStyle)
+    end)
+end
+
+local function stopAutoStyle()
+    if autoStyleConn then autoStyleConn:Disconnect() autoStyleConn = nil end
+    autoStyleState.hasSwitched = false
+    autoStyleState.isSwitching = false
+end
+
+MainLeft:AddLabel(' ')
+
+MainLeft:AddToggle('AutoSwitchStyle', {
+    Text = 'Auto Switch Style',
+    Default = false,
+    Callback = function(value)
+        autoStyleState.enabled = value
+        if value then startAutoStyle() else stopAutoStyle() end
+    end,
+})
+
+MainLeft:AddDropdown('AutoStyleMode', {
+    Text = 'Mode',
+    Values = {'Normal', 'Detect Opponent Type'},
+    Default = 1,
+    Callback = function(value)
+        autoStyleState.mode = value
+        autoStyleState.hasSwitched = false
+        if autoStyleState.enabled then stopAutoStyle() startAutoStyle() end
+    end,
+})
+
+MainLeft:AddDropdown('AutoStyleNormal', {
+    Text = 'Style (Normal Mode)',
+    Values = {'Standard', 'Rush', 'Focused', 'Bunker', 'Wobble'},
+    Default = 1,
+    Callback = function(value)
+        autoStyleState.normalStyle = value
+        if autoStyleState.enabled and autoStyleState.mode == "Normal" then
+            switchToStyle(value)
+        end
+    end,
+})
+
+local TYPE_LIST_STYLE = {"Attack", "Stamina", "Defense", "Balance"}
+for _, typeName in ipairs(TYPE_LIST_STYLE) do
+    MainLeft:AddDropdown('AutoStyleCounter_'..typeName, {
+        Text = typeName..' Counter Style',
+        Values = {'Standard', 'Rush', 'Focused', 'Bunker', 'Wobble'},
+        Default = 1,
+        Callback = function(value)
+            autoStyleState.counterStyle[typeName] = value
+            autoStyleState.hasSwitched = false
+        end,
+    })
+end
+
+MainLeft:AddButton('Clear Opponent History', function()
+    opponentHistory = {}
+    saveOpponentHistory()
+end)
+
 local function onAutoTrashLegit(value)
     toggleStates.AutoTrashFarm=value farmState.trashRunning=value
     if value then task.spawn(function() runFarmLoop(function() return farmState.trashRunning end,false) end) Notify("Trash Farm","Started!",3)
