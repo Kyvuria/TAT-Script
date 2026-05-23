@@ -1464,7 +1464,7 @@ local function buildTopBillboard(top)
     local sig2=attrs["SignatureMove_2"] or "?" local sig3=attrs["SignatureMove_3"] or "?"
     local atk=attrs["Attack"] or 0 local def=attrs["Defense"] or 0 local sta=attrs["Stamina"] or 0
     local sc=topInspector.scale
-    local BASE_W=260 local LINE_H=14 local PAD=4 local NUM_LINES=12
+    local BASE_W=260 local LINE_H=14 local PAD=4 local NUM_LINES=1
     local RPM_LABEL_H=20 local RPM_BAR_H=22 local RPM_GAP=6 local STATE_ROW_H=24
     local totalH=PAD+(LINE_H*NUM_LINES)+RPM_GAP+RPM_LABEL_H+RPM_BAR_H+STATE_ROW_H+PAD+12
     local bb=Instance.new("BillboardGui")
@@ -1473,6 +1473,11 @@ local function buildTopBillboard(top)
     bb.StudsOffsetWorldSpace=Vector3.new(0,5,0)
     bb.MaxDistance=150 bb.AlwaysOnTop=true
     bb.Adornee=attachPart bb.Parent=attachPart
+    local inspHL=Instance.new("Highlight")
+    inspHL.Name="TopInspectorHL" inspHL.FillColor=Color3.fromRGB(0,150,255)
+    inspHL.OutlineColor=Color3.fromRGB(0,150,255) inspHL.FillTransparency=0.5
+    inspHL.OutlineTransparency=0 inspHL.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
+    inspHL.Adornee=top inspHL.Parent=top
     local bg=Instance.new("Frame")
     bg.BackgroundColor3=Color3.fromRGB(10,10,20) bg.BackgroundTransparency=0.3
     bg.BorderSizePixel=0 bg.Size=UDim2.new(1,0,1,0) bg.Parent=bb
@@ -1488,31 +1493,6 @@ local function buildTopBillboard(top)
         yPos+=LINE_H return lbl
     end
     makeLine(getOwnerName(top),Color3.fromRGB(255,255,255))
-    makeLine("Spirit: "..spirit,Color3.fromRGB(150,100,255))
-    makeLine("Crown: "..crownName,Color3.fromRGB(255,215,0))
-    makeLine("Body: "..bodyName,Color3.fromRGB(160,220,160))
-    makeLine("Belt: "..beltName,Color3.fromRGB(205,133,63))
-    makeLine("Point: "..pointName,Color3.fromRGB(220,220,220))
-    makeLine("Moves: "..sig1,Color3.fromRGB(100,200,255))
-    makeLine("  "..sig2,Color3.fromRGB(100,200,255))
-    makeLine("  "..sig3,Color3.fromRGB(100,200,255))
-    makeLine('<font color="#FF4444">ATK:'..atk..'</font>  <font color="#44DD44">DEF:'..def..'</font>  <font color="#FFCC00">STA:'..sta..'</font>',Color3.fromRGB(255,255,255),true)
-    local typeMap={Attack="Rush",Stamina="Focused",Defense="Bunker",Balance="Wobble",Standard="Standard"}
-    local rawType=top:GetAttribute("LaunchType") or attrs["Type"] or attrs["Style"] or "?"
-    local styleVal=typeMap[rawType] or rawType
-    local styleStr=tostring(styleVal)
-    local styleColor
-    if styleStr:lower():find("rush") or styleStr:lower():find("attack") then styleColor=Color3.fromRGB(255,60,60)
-    elseif styleStr:lower():find("focus") or styleStr:lower():find("stamina") then styleColor=Color3.fromRGB(255,215,0)
-    elseif styleStr:lower():find("bunker") or styleStr:lower():find("defense") then styleColor=Color3.fromRGB(60,200,80)
-    elseif styleStr:lower():find("wobble") or styleStr:lower():find("balance") then styleColor=Color3.fromRGB(180,80,255)
-    else styleColor=Color3.fromRGB(200,200,200) end
-    makeLine("Style: "..styleStr, styleColor, false)
-    do
-        local allLabels = bb:GetChildren()
-        local lastLabel = allLabels[#allLabels]
-        if lastLabel and lastLabel:IsA("TextLabel") then lastLabel.TextSize = math.floor(13*sc) end
-    end
     yPos+=RPM_GAP
     local rpmLabelRow=yPos
     local rpmTitle=Instance.new("TextLabel")
@@ -1578,7 +1558,7 @@ local function buildTopBillboard(top)
         local freshPart=top:FindFirstChild("Body") or top:FindFirstChild("Crown") or top:FindFirstChildWhichIsA("BasePart")
         if freshPart and bb.Adornee~=freshPart then bb.Adornee=freshPart end
     end)
-    topInspector.bbCache[top]={bb=bb,rpmConn=rpmConn} topInspector.buildLock[top]=nil
+    topInspector.bbCache[top]={bb=bb,rpmConn=rpmConn,hl=inspHL} topInspector.buildLock[top]=nil
     local attrConn=top.AttributeChanged:Connect(function(attrName)
         local staticAttrs={Spirit=true,Attack=true,Defense=true,Stamina=true,SignatureMove_1=true,SignatureMove_2=true,SignatureMove_3=true,MaxHealth=true}
         if staticAttrs[attrName] then
@@ -1607,6 +1587,7 @@ end
 local function clearAllTopBillboards()
     for _,entry in pairs(topInspector.bbCache) do
         pcall(function() entry.rpmConn:Disconnect() end) pcall(function() entry.bb:Destroy() end)
+        pcall(function() if entry.hl then entry.hl:Destroy() end end)
     end topInspector.bbCache={} topInspector.buildLock={}
 end
 local function teardownTopInspectorListeners()
@@ -2061,6 +2042,26 @@ local function buildViewerGui(playerName,top)
             return
         end
         recalledTime=nil
+        local isStadium=(top:GetAttribute("IsStadiumFight")==true)
+        -- Also check my own top — if I'm not in a stadium fight, hide stats
+        local myTop=workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
+        local myInStadium=myTop and myTop:GetAttribute("IsStadiumFight")==true
+        if not isStadium and not myInStadium then
+            stateValLabel.Text="Not in stadium"
+            stateValLabel.TextColor3=Color3.fromRGB(120,120,120)
+            rpmValLabel.Text="-- / --" rpmValLabel.TextColor3=Color3.fromRGB(120,120,120)
+            rpmPctLabel.Text="--%" rpmPctLabel.TextColor3=Color3.fromRGB(120,120,120)
+            rpmBarFill.Size=UDim2.new(0,0,1,0)
+            rpmBarFill.BackgroundColor3=Color3.fromRGB(60,60,60)
+            for moveNum=1,3 do
+                local barData=passionBarFills[moveNum]
+                if barData and barData.fill and barData.fill.Parent then
+                    barData.fill.Size=UDim2.new(0,0,1,0)
+                    barData.label.Text="--"
+                end
+            end
+            return
+        end
         local state=tostring(top:GetAttribute("State") or "") local isSpinning=LIVE_STATES[state]==true
         local health=top:GetAttribute("Health") or 0 local maxHealth=top:GetAttribute("MaxHealth") or 0
         local currentRPM
@@ -2102,7 +2103,7 @@ local function buildViewerGui(playerName,top)
                     else
                         barData.fill.BackgroundColor3=Color3.fromRGB(255,165,0)
                     end
-                    barData.label.Text=passion.."/"..cost
+                    barData.label.Text=math.floor(passion).."/"..cost
                     barData.label.TextColor3=ready and Color3.fromRGB(200,150,255) or Color3.fromRGB(160,160,160)
                 else
                     -- No cost known — show raw passion from attribute
@@ -2111,10 +2112,10 @@ local function buildViewerGui(playerName,top)
                         local fp=math.clamp(passion/maxPassion,0,1)
                         barData.fill.Size=UDim2.new(fp,0,1,0)
                         barData.fill.BackgroundColor3=fp>=1 and Color3.fromRGB(180,80,255) or Color3.fromRGB(100,200,255)
-                        barData.label.Text=passion.."/"..maxPassion
+                        barData.label.Text=math.floor(passion).."/"..maxPassion
                     else
                         barData.fill.Size=UDim2.new(0,0,1,0)
-                        barData.label.Text=passion.."/?"
+                        barData.label.Text=math.floor(passion).."/?"
                     end
                 end
             end
@@ -2294,6 +2295,32 @@ local function startAutoOpponentViewer()
     -- Hook existing top immediately
     local existingTop=workspace.Tops:FindFirstChild(myId)
     if existingTop then hookMyTop(existingTop) end
+
+    -- Watch for IsStadiumFight flipping true on my top so we scan immediately
+    local stadiumFlagConn=nil
+    local function hookStadiumFlag(myTop)
+        if stadiumFlagConn then stadiumFlagConn:Disconnect() stadiumFlagConn=nil end
+        if not myTop then return end
+        stadiumFlagConn=myTop.AttributeChanged:Connect(function(attr)
+            if attr~="IsStadiumFight" then return end
+            if myTop:GetAttribute("IsStadiumFight")==true then
+                proximityInterval=0.5 -- force immediate scan next heartbeat
+                buildCycleList()
+                if #cycleList>0 then
+                    local entry=cycleList[1]
+                    lastOpponentName=entry.name
+                    lastOpponentTop=entry.top
+                    oppStoppedTime=nil
+                    buildViewerGui(entry.name,entry.top)
+                end
+            end
+        end)
+    end
+    if existingTop then hookStadiumFlag(existingTop) end
+    local oldTopsAddedConn=topsAddedConn
+    workspace.Tops.ChildAdded:Connect(function(top)
+        if top.Name==myId then task.wait(0.3) hookStadiumFlag(top) end
+    end)
 
     -- VS label scanner: only fires when no current opponent locked in
     local myName=LocalPlayer.Name
@@ -2537,6 +2564,9 @@ local function startAutoOpponentViewer()
         local hasTarget=myTop and myTop:FindFirstChild("Target")
         local targetTop=hasTarget and hasTarget.Value
         if targetTop and targetTop.Parent then return end
+        -- Only scan proximity if MY top is in a stadium fight OR has health (just launched)
+        local myHealth=myTop and myTop:GetAttribute("Health")
+        if not myTop or (myTop:GetAttribute("IsStadiumFight")~=true and (not myHealth or myHealth<=0)) then return end
 
         -- Scan arena for all spinning opponents
         local changed=buildCycleList()
