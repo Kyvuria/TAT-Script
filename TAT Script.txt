@@ -3268,6 +3268,7 @@ ESPViewer:AddToggle('AutoOpponentViewer',{
 local MiscLeft  = Tabs.Misc:AddLeftGroupbox('Character')
 local MiscRight = Tabs.Misc:AddRightGroupbox('Server')
 
+
 MiscLeft:AddButton('Debug Full Top',function()
     local top=getMyTop()
     if not top then Notify("Debug","No top!",3) return end
@@ -3344,6 +3345,104 @@ end
 toggleCallbacks["AntiAFK"]=onAntiAFK
 MiscLeft:AddToggle('AntiAFK',{Text='Anti AFK',Default=startFlags.AntiAFK,Callback=onAntiAFK})
 if startFlags.AntiAFK then onAntiAFK(true) end
+
+-- ── Mod Notifier ──────────────────────────────────────────────────────────────
+local MOD_GROUP_ID = 32975736
+local MOD_MIN_RANK = 50 -- adjust after testing, higher = more senior roles
+local modNotifierConn = nil
+local knownModStatus = {}
+
+local function getGroupRank(userId)
+    local ok, result = pcall(function()
+        return HttpService:JSONDecode(
+            game:HttpGet("https://groups.roblox.com/v1/users/"..userId.."/groups/roles")
+        )
+    end)
+    if not ok or not result or not result.data then return 0 end
+    for _, entry in ipairs(result.data) do
+        if entry.group and entry.group.id == MOD_GROUP_ID then
+            return entry.role and entry.role.rank or 0
+        end
+    end
+    return 0
+end
+
+local function checkPlayerForMod(player)
+    if player == LocalPlayer then return end
+    if knownModStatus[player.UserId] ~= nil then return end
+    knownModStatus[player.UserId] = false
+    task.spawn(function()
+        local rank = getGroupRank(player.UserId)
+        if rank >= MOD_MIN_RANK then
+            knownModStatus[player.UserId] = true
+            -- On-screen alert
+            local sg = Instance.new("ScreenGui")
+            sg.Name = "ModAlert" sg.ResetOnSpawn = false
+            sg.DisplayOrder = 9999 sg.Parent = playerGui
+            local frame = Instance.new("Frame")
+            frame.BackgroundColor3 = Color3.fromRGB(200,30,30)
+            frame.BackgroundTransparency = 0.15 frame.BorderSizePixel = 0
+            frame.Size = UDim2.new(0,340,0,70)
+            frame.Position = UDim2.new(0.5,-170,0,60) frame.Parent = sg
+            Instance.new("UICorner", frame).CornerRadius = UDim.new(0,8)
+            local lbl = Instance.new("TextLabel")
+            lbl.BackgroundTransparency = 1 lbl.Size = UDim2.new(1,0,1,0)
+            lbl.Font = Enum.Font.GothamBold lbl.TextSize = 16
+            lbl.TextColor3 = Color3.fromRGB(255,255,255)
+            lbl.TextStrokeTransparency = 0 lbl.TextStrokeColor3 = Color3.fromRGB(0,0,0)
+            lbl.Text = "⚠ MOD DETECTED: "..player.Name.."\nRank: "..rank
+            lbl.Parent = frame
+            -- Auto dismiss after 8 seconds
+            task.delay(8, function() pcall(function() sg:Destroy() end) end)
+            Notify("Mod Notifier", "MOD IN SERVER: "..player.Name, 8)
+        end
+    end)
+end
+
+local function startModNotifier()
+    knownModStatus = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        checkPlayerForMod(p)
+    end
+    modNotifierConn = Players.PlayerAdded:Connect(function(p)
+        task.wait(1)
+        checkPlayerForMod(p)
+    end)
+end
+
+local function stopModNotifier()
+    if modNotifierConn then modNotifierConn:Disconnect() modNotifierConn = nil end
+    knownModStatus = {}
+    local old = playerGui:FindFirstChild("ModAlert")
+    if old then old:Destroy() end
+end
+
+MiscLeft:AddToggle('ModNotifier', {
+    Text = 'Mod Notifier',
+    Default = false,
+    Callback = function(value)
+        if value then startModNotifier()
+        else stopModNotifier() end
+    end,
+})
+
+MiscLeft:AddToggle('KickOnMod', {
+    Text = 'Kick On Mod Join',
+    Default = false,
+    Callback = function(value)
+        if not value then return end
+        -- Hook into the mod detection
+        local origCheck = checkPlayerForMod
+        Players.PlayerAdded:Connect(function(p)
+            task.wait(1)
+            local rank = getGroupRank(p.UserId)
+            if rank >= MOD_MIN_RANK then
+                task.wait(0.5)
+                TeleportService:Teleport(game.PlaceId, LocalPlayer)
+            end
+        end)
+    end,
+})
 
 MiscRight:AddButton('Rejoin',function()
     Notify("Rejoin","Rejoining...",2) task.wait(0.5) TeleportService:Teleport(game.PlaceId,LocalPlayer)
