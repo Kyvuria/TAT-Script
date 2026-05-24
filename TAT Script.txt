@@ -1422,6 +1422,10 @@ local function startAutoStyle()
 
         local targetStyle = autoStyleState.counterStyle[oppType]
         if not targetStyle or targetStyle == "" then return end
+        local currentMap = getCurrentTournamentMap()
+        if currentMap and autoStyleState.mapBlacklist and autoStyleState.mapBlacklist[oppType] and autoStyleState.mapBlacklist[oppType][currentMap] then
+            targetStyle = "Standard"
+        end
 
         lastDetectedOpponent = oppName
         autoStyleState.hasSwitched = false
@@ -1469,7 +1473,47 @@ MainLeft:AddDropdown('AutoStyleNormal', {
     end,
 })
 
+local function getCurrentTournamentMap()
+    local ok, eventStadium = pcall(function() return workspace.Map.Stadiums:FindFirstChild("Event Stadium") end)
+    if not ok or not eventStadium then return nil end
+    local core = eventStadium:FindFirstChild("Core")
+    local weight = core and core:GetAttribute("Weight")
+    for _, v in ipairs(eventStadium:GetDescendants()) do
+        if v.Name == "Cage Controller Script" then return "Cage Stadium" end
+        if v.Name == "Wall Controller Script" then return "Ice Walls Stadium" end
+        if v.Name == "Disc Controller Script" then return "Spinning Disc Stadium" end
+        if v.Name == "Arm Controller" then return "Spinning Arm Stadium" end
+        if v.Name == "Tournament Three Sound" then return "Sand Stadium" end
+    end
+    if weight == 50 then return "Classic Stadium" end
+    if weight == 40 then return "Ice Stadium" end
+    if weight == 35 then return "Rusty Stadium" end
+    return nil
+end
+
 local TYPE_LIST_STYLE = {"Attack", "Stamina", "Defense", "Balance"}
+local MAP_LIST = {"Classic Stadium", "Cage Stadium", "Ice Stadium", "Ice Walls Stadium", "Spinning Disc Stadium", "Spinning Arm Stadium", "Sand Stadium", "Rusty Stadium"}
+
+if not autoStyleState.mapBlacklist then autoStyleState.mapBlacklist = {} end
+
+local function getCurrentTournamentMap()
+    local ok, eventStadium = pcall(function() return workspace.Map.Stadiums:FindFirstChild("Event Stadium") end)
+    if not ok or not eventStadium then return nil end
+    local core = eventStadium:FindFirstChild("Core")
+    local weight = core and core:GetAttribute("Weight")
+    for _, v in ipairs(eventStadium:GetDescendants()) do
+        if v.Name == "Cage Controller Script" then return "Cage Stadium" end
+        if v.Name == "Wall Controller Script" then return "Ice Walls Stadium" end
+        if v.Name == "Disc Controller Script" then return "Spinning Disc Stadium" end
+        if v.Name == "Arm Controller" then return "Spinning Arm Stadium" end
+        if v.Name == "Tournament Three Sound" then return "Sand Stadium" end
+    end
+    if weight == 50 then return "Classic Stadium" end
+    if weight == 40 then return "Ice Stadium" end
+    if weight == 35 then return "Rusty Stadium" end
+    return nil
+end
+
 for _, typeName in ipairs(TYPE_LIST_STYLE) do
     MainLeft:AddDropdown('AutoStyleCounter_'..typeName, {
         Text = typeName..' Counter Style',
@@ -1477,6 +1521,20 @@ for _, typeName in ipairs(TYPE_LIST_STYLE) do
         Default = 1,
         Callback = function(value)
             autoStyleState.counterStyle[typeName] = value
+            autoStyleState.hasSwitched = false
+        end,
+    })
+    if not autoStyleState.mapBlacklist[typeName] then autoStyleState.mapBlacklist[typeName] = {} end
+    MainLeft:AddDropdown('AutoStyleMapBlacklist_'..typeName, {
+        Text = typeName..' Map Blacklist (Use Standard)',
+        Values = MAP_LIST,
+        Default = {},
+        Multi = true,
+        Callback = function(selectedTable)
+            autoStyleState.mapBlacklist[typeName] = {}
+            for mapName, isSelected in pairs(selectedTable) do
+                if isSelected then autoStyleState.mapBlacklist[typeName][mapName] = true end
+            end
             autoStyleState.hasSwitched = false
         end,
     })
@@ -2046,6 +2104,7 @@ local function onTopInspector(value)
 end
 ESPLeft:AddToggle('TopInspector',{Text='Top ESP',Default=false,Callback=onTopInspector})
 ESPLeft:AddToggle('HideOwnTop',{Text='Hide Own Top',Default=false,Callback=function(value)
+
     local myId=tostring(LocalPlayer.UserId)
     local myTop=workspace.Tops:FindFirstChild(myId)
     if myTop then
