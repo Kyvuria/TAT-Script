@@ -1526,7 +1526,7 @@ for _, typeName in ipairs(TYPE_LIST_STYLE) do
     })
     if not autoStyleState.mapBlacklist[typeName] then autoStyleState.mapBlacklist[typeName] = {} end
     MainLeft:AddDropdown('AutoStyleMapBlacklist_'..typeName, {
-        Text = typeName..' Map Blacklist (Use Standard)',
+        Text = typeName..' Map Blacklist ',
         Values = MAP_LIST,
         Default = {},
         Multi = true,
@@ -2104,7 +2104,6 @@ local function onTopInspector(value)
 end
 ESPLeft:AddToggle('TopInspector',{Text='Top ESP',Default=false,Callback=onTopInspector})
 ESPLeft:AddToggle('HideOwnTop',{Text='Hide Own Top',Default=false,Callback=function(value)
-
     local myId=tostring(LocalPlayer.UserId)
     local myTop=workspace.Tops:FindFirstChild(myId)
     if myTop then
@@ -2148,6 +2147,73 @@ ESPLeft:AddToggle('HideOwnTop',{Text='Hide Own Top',Default=false,Callback=funct
         end
     end
 end})
+
+-- ── NPC ESP ───────────────────────────────────────────────────────────────────
+local npcESP = { enabled=false, cache={} }
+local NPC_NAMES = {
+    "Spirit Trainer","Bunker Trainer","Legendary Blader","Nurse",
+    "Focus Trainer","Wobble Trainer","Weak Stamina User","Gamepass NPC",
+    "Doctor","Rush Trainer",
+}
+
+local function createNPCESP(npc)
+    if npcESP.cache[npc] then return end
+    local hrp = npc:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    local oldHL = npc:FindFirstChild("NPCESPHighlight") if oldHL then oldHL:Destroy() end
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "NPCESPHighlight"
+    highlight.FillColor = Color3.fromRGB(180,80,255)
+    highlight.OutlineColor = Color3.fromRGB(180,80,255)
+    highlight.FillTransparency = 0.3
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Adornee = npc highlight.Parent = npc
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "NPCESP" bb.AlwaysOnTop = true bb.Size = UDim2.new(0,160,0,40)
+    bb.StudsOffset = Vector3.new(0,3.5,0) bb.Adornee = hrp bb.Parent = hrp
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1 label.Size = UDim2.new(1,0,1,0)
+    label.Font = Enum.Font.GothamBold label.TextSize = 13
+    label.TextColor3 = Color3.fromRGB(200,130,255)
+    label.TextStrokeTransparency = 0 label.TextStrokeColor3 = Color3.fromRGB(0,0,0)
+    label.Text = npc.Name label.Parent = bb
+    local heartbeatConn = RunService.Heartbeat:Connect(function()
+        if not npcESP.enabled or not hrp or not hrp.Parent then return end
+        local char = LocalPlayer.Character
+        local myHRP = char and char:FindFirstChild("HumanoidRootPart")
+        if myHRP then
+            label.Text = npc.Name.."\n"..math.floor((myHRP.Position-hrp.Position).Magnitude).." studs"
+        end
+    end)
+    npcESP.cache[npc] = {bb=bb, highlight=highlight, heartbeat=heartbeatConn}
+end
+
+local function clearNPCESP()
+    for npc, entry in pairs(npcESP.cache) do
+        pcall(function() entry.heartbeat:Disconnect() end)
+        pcall(function() entry.bb:Destroy() end)
+        pcall(function() entry.highlight:Destroy() end)
+    end
+    npcESP.cache = {}
+end
+
+local function onNPCESP(value)
+    npcESP.enabled = value
+    if value then
+        local npcs = workspace.Map:FindFirstChild("World NPCs")
+        if not npcs then Notify("NPC ESP","Could not find NPCs folder!",3) return end
+        for _, npc in ipairs(npcs:GetChildren()) do
+            for _, name in ipairs(NPC_NAMES) do
+                if npc.Name == name then createNPCESP(npc) break end
+            end
+        end
+        Notify("NPC ESP","Enabled!",3)
+    else
+        clearNPCESP() Notify("NPC ESP","Disabled.",3)
+    end
+end
+ESPLeft:AddToggle('NPCESP',{Text='NPC ESP',Default=false,Callback=onNPCESP})
 
 -- Trash ESP
 local function createTrashESP(part)
