@@ -888,14 +888,15 @@ local function onAutoStateKeeper(value)
     if value then
         connections.stateKeeper=RunService.Heartbeat:Connect(function()
             if stateKeeperState.isFixing then return end
-            if autoSwitchState.enabled then return end
-            if autoStyleState.isSwitching then return end
-            local myTop=workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId)) if not myTop then return end
-            if myTop:GetAttribute("IsStadiumFight") ~= true then return end
-            local ok,label=pcall(function() return playerGui.HUD["Top UI"].Info.Top.State end)
-            if not ok or not label then return end
-            local state=label.Text
-            if state:find("Recalling") or state:find("Launching") or not state:find("Idle") then return end
+        if autoStyleState and autoStyleState.isSwitching then return end
+            local myTop=workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
+            if not myTop then return end
+            -- Check attribute directly instead of HUD label (more reliable)
+            local state=tostring(myTop:GetAttribute("State") or "")
+            if state == "" then return end
+            if state == "Recalling" or state == "Launching" then return end
+            if state ~= "Idle" then return end
+            -- Don't require IsStadiumFight — also fix idle outside tournament
             stateKeeperState.isFixing=true
             task.spawn(function()
                 local presses=stateKeeperState.preferredState=="Guarding" and 2 or 1
@@ -919,6 +920,273 @@ MainLeft:AddDropdown('PreferredState',{Text='Preferred State',Values={'Attacking
     stateKeeperState.preferredState=value
     if toggleStates.AutoStateKeeper then Notify("State Keeper","Now keeping: "..stateKeeperState.preferredState,2) end
 end})
+
+-- ── Auto Part Mode Switcher ───────────────────────────────────────────────────
+local autoPartMode = {
+    enabled = false,
+    bodyMode = 1,
+    beltMode = 1,
+    isSwitching = false,
+}
+
+local function getMyTopForPartMode()
+    return workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
+end
+
+local function getPartModeOptions(partName)
+    -- Read what part the player has and return its mode options
+    local top = getMyTopForPartMode()
+    local partInHand = nil
+    
+    -- Try from launched top first
+    if top then
+        local part = top:FindFirstChild(partName)
+        if part then
+            local n = part:GetAttribute("Name")
+            if n and tostring(n) ~= "" then partInHand = tostring(n) end
+        end
+    end
+    
+    -- Try from character/loadout if top not out
+    if not partInHand then
+        -- Check HUD or workspace for equipped part info
+        local ok, val = pcall(function()
+            return playerGui.HUD["Top UI"].Info.Top[partName]
+        end)
+        if ok and val then
+            local n = val:GetAttribute("Name") or val.Text
+            if n and tostring(n) ~= "" then partInHand = tostring(n) end
+        end
+    end
+    
+    if not partInHand then return {"Mode 1", "Mode 2"}, nil end
+    
+    -- Look up modes for this part
+    for partKey, modeMap in pairs(PART_MODE_DISPLAY) do
+        if partInHand:lower():find(partKey:lower(), 1, true) then
+            local options = {}
+            -- modeMap has keys "1","2" etc
+            local i = 1
+            while modeMap[tostring(i)] do
+                table.insert(options, modeMap[tostring(i)])
+                i += 1
+            end
+            if #options > 0 then return options, partInHand end
+        end
+    end
+    
+    return {"Mode 1", "Mode 2"}, partInHand
+end
+
+local function findPartModeButton(partType, modeIndex)
+    task.wait(0.2)
+    local partLower = partType:lower()
+    for _, gui in ipairs(playerGui:GetChildren()) do
+        if not gui:IsA("ScreenGui") or not gui.Enabled then continue end
+        local function searchForButtons(inst, depth)
+            if depth > 8 then return nil end
+            for _, child in ipairs(inst:GetChildren()) do
+                if not child.Visible then continue end
+                local hasPartType = false
+                local function checkForPartType(c, d)
+                    if hasPartType or d > 3 then return end
+                    if c:IsA("TextLabel") or c:IsA("TextButton") then
+                        local t = (c.Text or ""):lower()
+                        if t == partLower or t:sub(1, #partLower) == partLower then
+                            hasPartType = true
+                            return
+                        end
+                    end
+                    for _, ch in ipairs(c:GetChildren()) do checkForPartType(ch, d+1) end
+                end
+                checkForPartType(child, 0)
+                if hasPartType then
+                    local buttons = {}
+                    local function collectButtons(c)
+                        for _, b in ipairs(c:GetChildren()) do
+                            if b:IsA("TextButton") and b.Visible and b.Text ~= "" and b.Text:lower() ~= partLower then
+                                table.insert(buttons, b)
+                            end
+                            collectButtons(b)
+                        end
+                    end
+                    collectButtons(child)
+                    table.sort(buttons, function(a, b)
+                        return a.AbsolutePosition.X < b.AbsolutePosition.X
+                    end)
+                    if #buttons >= modeIndex then
+                        return buttons[modeIndex]
+                    end
+                end
+                local found = searchForButtons(child, depth + 1)
+                if found then return found end
+            end
+            return nil
+        end
+        local btn = searchForButtons(gui, 0)
+        if btn then return btn end
+    end
+    return nil
+end
+
+local function doPartModeSwitch()
+    if autoPartMode.isSwitching then return end
+    local top = getMyTopForPartMode()
+    if top then
+        local health = top:GetAttribute("Health")
+        if health and health > 0 then return end
+    end
+    autoPartMode.isSwitching = true
+    task.spawn(function()
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.N, false, game)
+        task.wait(0.05)
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.N, false, game)
+        task.wait(0.5)
+
+        local bodyBtn = findPartModeButton("Body", autoPartMode.bodyMode)
+        if bodyBtn then
+            local pos = bodyBtn.AbsolutePosition
+            local size = bodyBtn.AbsoluteSize
+            local cx = math.floor(pos.X + size.X / 2)
+            local cy = math.floor(pos.Y + size.Y / 2)
+            VirtualInputManager:SendMouseMoveEvent(cx, cy, game)
+            task.wait(0.05)
+            VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
+            task.wait(0.05)
+            VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
+            task.wait(0.2)
+        end
+
+        local beltBtn = findPartModeButton("Belt", autoPartMode.beltMode)
+        if beltBtn then
+            local pos = beltBtn.AbsolutePosition
+            local size = beltBtn.AbsoluteSize
+            local cx = math.floor(pos.X + size.X / 2)
+            local cy = math.floor(pos.Y + size.Y / 2)
+            VirtualInputManager:SendMouseMoveEvent(cx, cy, game)
+            task.wait(0.05)
+            VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
+            task.wait(0.05)
+            VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
+            task.wait(0.2)
+        end
+
+        task.wait(0.1)
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.N, false, game)
+        task.wait(0.05)
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.N, false, game)
+
+        autoPartMode.isSwitching = false
+    end)
+end
+-- Dropdowns (will be updated dynamically)
+local bodyModeOptions, bodyPartName = getPartModeOptions("Body")
+local beltModeOptions, beltPartName = getPartModeOptions("Belt")
+
+local autoPartModeConn = nil
+local bodyModeDropdown = nil
+local beltModeDropdown = nil
+
+local function refreshPartModeDropdowns()
+    local newBodyOptions, newBodyName = getPartModeOptions("Body")
+    local newBeltOptions, newBeltName = getPartModeOptions("Belt")
+    
+    if bodyModeDropdown then
+        pcall(function() bodyModeDropdown:SetValues(newBodyOptions) end)
+    end
+    if beltModeDropdown then
+        pcall(function() beltModeDropdown:SetValues(newBeltOptions) end)
+    end
+end
+
+local function startAutoPartMode()
+    if autoPartModeConn then autoPartModeConn:Disconnect() autoPartModeConn = nil end
+    
+    -- Switch immediately on enable
+    doPartModeSwitch()
+    
+    -- Watch for top being picked up (leaves workspace = was recalled/picked up)
+    local lastTopPresent = getMyTopForPartMode() ~= nil
+    autoPartModeConn = RunService.Heartbeat:Connect(function()
+        if not autoPartMode.enabled then return end
+        
+        local topNow = getMyTopForPartMode()
+        local topPresent = topNow ~= nil
+        
+        -- Top just disappeared (picked up or recalled) — switch modes now
+        if lastTopPresent and not topPresent then
+            task.wait(0.5) -- brief wait for pickup animation
+            doPartModeSwitch()
+        end
+        
+        -- Also refresh dropdowns if part changes detected
+        if topNow then
+            local bodyPart = topNow:FindFirstChild("Body")
+            local beltPart = topNow:FindFirstChild("Belt")
+            local currentBodyName = bodyPart and tostring(bodyPart:GetAttribute("Name") or "")
+            local currentBeltName = beltPart and tostring(beltPart:GetAttribute("Name") or "")
+            if currentBodyName ~= (bodyPartName or "") or currentBeltName ~= (beltPartName or "") then
+                bodyPartName = currentBodyName
+                beltPartName = currentBeltName
+                refreshPartModeDropdowns()
+            end
+        end
+        
+        lastTopPresent = topPresent
+    end)
+end
+
+local function stopAutoPartMode()
+    if autoPartModeConn then autoPartModeConn:Disconnect() autoPartModeConn = nil end
+    autoPartMode.isSwitching = false
+end
+
+MainLeft:AddToggle('AutoPartMode', {
+    Text = 'Auto Part Mode Switcher',
+    Default = false,
+    Callback = function(value)
+        autoPartMode.enabled = value
+        if value then
+            startAutoPartMode()
+            Notify("Part Mode", "Auto switcher enabled!", 3)
+        else
+            stopAutoPartMode()
+            Notify("Part Mode", "Auto switcher disabled.", 3)
+        end
+    end,
+})
+
+bodyModeDropdown = MainLeft:AddDropdown('AutoPartModeBody', {
+    Text = 'Body Mode',
+    Values = bodyModeOptions,
+    Default = 1,
+    Callback = function(value)
+        -- Find index of selected value
+        local opts = getPartModeOptions("Body")
+        for i, v in ipairs(opts) do
+            if v == value then autoPartMode.bodyMode = i break end
+        end
+    end,
+})
+
+beltModeDropdown = MainLeft:AddDropdown('AutoPartModeBelt', {
+    Text = 'Belt Mode',
+    Values = beltModeOptions,
+    Default = 1,
+    Callback = function(value)
+        local opts = getPartModeOptions("Belt")
+        for i, v in ipairs(opts) do
+            if v == value then autoPartMode.beltMode = i break end
+        end
+    end,
+})
+
+-- Watch for top changes to refresh dropdowns
+workspace.Tops.ChildAdded:Connect(function(top)
+    if top.Name ~= tostring(LocalPlayer.UserId) then return end
+    task.wait(0.5)
+    refreshPartModeDropdowns()
+end)
 
 -- ── Auto Switch State At RPM % ────────────────────────────────────────────────
 local autoSwitchState = {
@@ -1437,6 +1705,7 @@ local function stopAutoStyle()
     if autoStyleConn then autoStyleConn:Disconnect() autoStyleConn = nil end
     autoStyleState.hasSwitched = false
     autoStyleState.isSwitching = false
+    autoStyleState._resetTimer = nil
 end
 
 MainLeft:AddLabel(' ')
@@ -2486,7 +2755,7 @@ local function buildViewerGui(playerName,top)
             if not matchesPlayer then local ov=newTop:FindFirstChild("Owner") if ov and ov.Value and ov.Value.Name==playerName then matchesPlayer=true end end
             if matchesPlayer then
                 watchConn:Disconnect()
-                task.wait(0.4)
+                task.wait(0.1)
                 if not viewer.autoEnabled then
                     buildViewerGui(playerName,newTop) Notify("Top Viewer",playerName.."'s top is now in arena!",3)
                 end
@@ -2597,11 +2866,6 @@ local function buildViewerGui(playerName,top)
                 if child.Value~="" and child.Value~="?" then return child.Value end
             end
         end
-        task.wait(0.3)
-        local n2=part:GetAttribute("Name")
-        if n2 and tostring(n2)~="" and tostring(n2)~="?" then return tostring(n2) end
-        local iname2=part.Name
-        if iname2 and iname2~=pName and iname2~="" then return iname2 end
         return "?"
     end
 
@@ -2735,7 +2999,12 @@ local function buildViewerGui(playerName,top)
                 rpmBarFill.BackgroundColor3=Color3.fromRGB(100,100,100)
             end
             local left=math.ceil(RECALLED_WAIT-(tick()-recalledTime))
-            if left>0 then
+            -- In multi-opponent/auto mode don't wait out the recall countdown
+            if viewer.autoEnabled then
+                recalledTime=nil
+                if viewer.liveConn then viewer.liveConn:Disconnect() viewer.liveConn=nil end
+                task.spawn(function() buildViewerGui("Waiting for beyblade...",nil) end)
+            elseif left>0 then
                 stateValLabel.Text="Recalled ("..left.."s)"
                 stateValLabel.TextColor3=Color3.fromRGB(200,180,0)
                 rpmValLabel.Text="0 / 0" rpmValLabel.TextColor3=Color3.fromRGB(150,150,150)
@@ -2747,7 +3016,7 @@ local function buildViewerGui(playerName,top)
             end
             return
         end
-        recalledTime=nil
+        if recalledTime then recalledTime=nil end
         local isStadium=(top:GetAttribute("IsStadiumFight")==true)
         -- Also check my own top — if I'm not in a stadium fight, hide stats
         local myTop=workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
@@ -2775,7 +3044,14 @@ local function buildViewerGui(playerName,top)
             local liveRPM=(maxHealth>0) and math.floor(health*20) or 0
             if liveRPM>0 then lastKnownRPM2=liveRPM zeroFrames2=0 currentRPM=liveRPM
             else zeroFrames2+=1 currentRPM=zeroFrames2>=ZERO_THRESH2 and 0 or lastKnownRPM2 end
-        else zeroFrames2=0 currentRPM=lastKnownRPM2 end
+        else
+            -- Not spinning: if health is actually 0 or bey is knocked out, show 0
+            if not health or health<=0 then
+                lastKnownRPM2=0 zeroFrames2=0 currentRPM=0
+            else
+                zeroFrames2=0 currentRPM=lastKnownRPM2
+            end
+        end
         local maxRPM=(maxHealth>0) and math.floor(maxHealth*20) or 1
         local rawPct=currentRPM/math.max(maxRPM,1)
         local pct=math.clamp(rawPct,0,1)
@@ -2894,137 +3170,132 @@ end})
 
 -- ── Auto Opponent Viewer ──────────────────────────────────────────────────────
 local function startAutoOpponentViewer()
-    if viewer.autoConn then viewer.autoConn:Disconnect() viewer.autoConn=nil end
+    if viewer.autoConn then viewer.autoConn:Disconnect() viewer.autoConn = nil end
     if viewer._extraConns then
-        for _,c in ipairs(viewer._extraConns) do pcall(function() c:Disconnect() end) end
-        viewer._extraConns=nil
+        for _, c in ipairs(viewer._extraConns) do pcall(function() c:Disconnect() end) end
+        viewer._extraConns = nil
     end
-    local lastOpponentName=nil
-    local lastOpponentTop=nil
-    local targetWatchConn=nil
-    local myId=tostring(LocalPlayer.UserId)
 
-    -- Returns the Name string to display for a top (handles NPC tops too)
+    local lastOpponentName = nil
+    local lastOpponentTop = nil
+    local targetWatchConn = nil
+    local myId = tostring(LocalPlayer.UserId)
+
     local function getOpponentNameFromTop(oppTop)
         if not oppTop then return nil end
-        local uid=tonumber(oppTop.Name)
+        local uid = tonumber(oppTop.Name)
         if uid then
-            local p=Players:GetPlayerByUserId(uid)
+            local p = Players:GetPlayerByUserId(uid)
             if p then return p.Name end
-            -- NPC with numeric ID — use the ID as display key
-            return "NPC:"..oppTop.Name
+            return "NPC:" .. oppTop.Name
         end
-        local ov=oppTop:FindFirstChild("Owner")
+        local ov = oppTop:FindFirstChild("Owner")
         if ov and ov.Value then return ov.Value.Name end
-        -- Non-numeric name top (NPC or named top)
         return oppTop.Name
     end
 
-    -- Check if a top belongs to an NPC (not a real player)
     local function isNPCTop(oppTop)
         if not oppTop then return false end
-        local uid=tonumber(oppTop.Name)
-        if uid then
-            return Players:GetPlayerByUserId(uid)==nil
-        end
-        local ov=oppTop:FindFirstChild("Owner")
-        if ov and ov.Value then
-            -- Owner exists and is a player instance — not NPC
-            return false
-        end
-        -- No numeric name and no Owner player reference = NPC
+        local uid = tonumber(oppTop.Name)
+        if uid then return Players:GetPlayerByUserId(uid) == nil end
+        local ov = oppTop:FindFirstChild("Owner")
+        if ov and ov.Value then return false end
         return true
     end
 
-    local oppStoppedTime=nil
-    local oppCycleOverride=false -- true when cycling is active, bypass the name lock
+    -- oppStoppedTime is only used to debounce clearing the CURRENT opponent
+    -- It does NOT block the cycle scanner from running
+    local oppStoppedTime = nil
+    local STOPPED_CLEAR_DELAY = 4
+
     local function openForOpponent(oppTop, oppName)
         local name = oppName or getOpponentNameFromTop(oppTop)
-        if not name or name=="" then return end
-        if name==lastOpponentName and oppTop==lastOpponentTop then return end
-        -- If we already have a real player locked, don't replace with an NPC
-        if lastOpponentName and lastOpponentTop then
-            local currentIsNPC=isNPCTop(lastOpponentTop)
-            local newIsNPC=oppTop and isNPCTop(oppTop) or true
-            if not currentIsNPC and newIsNPC then return end
+        if not name or name == "" then return end
+        if name == lastOpponentName and oppTop == lastOpponentTop then return end
+
+        -- Don't replace a live real-player top with an NPC
+        if lastOpponentTop and lastOpponentTop.Parent then
+            local currentHealth = lastOpponentTop:GetAttribute("Health")
+            if currentHealth and currentHealth > 0 then
+                local currentIsNPC = isNPCTop(lastOpponentTop)
+                local newIsNPC = oppTop and isNPCTop(oppTop) or true
+                if not currentIsNPC and newIsNPC then return end
+            end
         end
-        -- If new top is NPC but a real player top exists nearby, skip the NPC
+
+        -- If new top is NPC, check if a real player top is closer
         if oppTop and isNPCTop(oppTop) then
-            local myTop=workspace.Tops:FindFirstChild(myId)
+            local myTop = workspace.Tops:FindFirstChild(myId)
             if myTop then
-                local ok0,myPivot=pcall(function() return myTop:GetPivot().Position end)
+                local ok0, myPivot = pcall(function() return myTop:GetPivot().Position end)
                 if ok0 then
-                    for _,top in ipairs(workspace.Tops:GetChildren()) do
-                        if top.Name==myId then continue end
+                    for _, top in ipairs(workspace.Tops:GetChildren()) do
+                        if top.Name == myId then continue end
                         if isNPCTop(top) then continue end
-                        local h=top:GetAttribute("Health")
-                        if not h or h<=0 then continue end
-                        local ok2,pivot=pcall(function() return top:GetPivot().Position end)
-                        if ok2 and (myPivot-pivot).Magnitude<45 then
-                            -- Real player top nearby, show that instead
-                            local realName=getOpponentNameFromTop(top)
-                            lastOpponentName=realName lastOpponentTop=top oppStoppedTime=nil
+                        local h = top:GetAttribute("Health")
+                        if not h or h <= 0 then continue end
+                        local ok2, pivot = pcall(function() return top:GetPivot().Position end)
+                        if ok2 and (myPivot - pivot).Magnitude < 45 then
+                            local realName = getOpponentNameFromTop(top)
+                            lastOpponentName = realName
+                            lastOpponentTop = top
+                            oppStoppedTime = nil
                             buildViewerGui(realName, top)
-                            Notify("Auto Viewer","Opponent: "..realName, 4)
+                            Notify("Auto Viewer", "Opponent: " .. realName, 4)
                             return
                         end
                     end
                 end
             end
         end
-        lastOpponentName=name lastOpponentTop=oppTop oppStoppedTime=nil
+
+        lastOpponentName = name
+        lastOpponentTop = oppTop
+        oppStoppedTime = nil
         if oppTop and oppTop.Parent then
             buildViewerGui(name, oppTop)
-            Notify("Auto Viewer","Opponent: "..name, 4)
+            Notify("Auto Viewer", "Opponent: " .. name, 4)
         else
             buildViewerGui("Waiting for beyblade...", nil)
         end
     end
 
     local function clearOpponent()
-        lastOpponentName=nil
-        lastOpponentTop=nil
+        lastOpponentName = nil
+        lastOpponentTop = nil
+        oppStoppedTime = nil
         if viewer.autoEnabled then
             buildViewerGui("Waiting for beyblade...", nil)
         end
     end
 
-    -- Given my top, hook its Target child to detect opponent
     local function hookMyTop(myTop)
-        if targetWatchConn then targetWatchConn:Disconnect() targetWatchConn=nil end
+        if targetWatchConn then targetWatchConn:Disconnect() targetWatchConn = nil end
         if not myTop then clearOpponent() return end
 
         local function handleTargetValue(targetChild)
             if not targetChild then return end
-            local oppTop=targetChild.Value
-            if oppTop and oppTop.Parent then
-                openForOpponent(oppTop, nil)
-            end
-            -- Watch for value change (target assigned after child added)
+            local oppTop = targetChild.Value
+            if oppTop and oppTop.Parent then openForOpponent(oppTop, nil) end
             targetChild:GetPropertyChangedSignal("Value"):Connect(function()
-                local opp=targetChild.Value
-                if opp and opp.Parent then
-                    openForOpponent(opp, nil)
-                end
+                local opp = targetChild.Value
+                if opp and opp.Parent then openForOpponent(opp, nil) end
             end)
         end
 
-        -- Check if Target already exists
-        local existingTarget=myTop:FindFirstChild("Target")
+        local existingTarget = myTop:FindFirstChild("Target")
         if existingTarget then handleTargetValue(existingTarget) end
 
-        -- Watch for Target being added
-        targetWatchConn=myTop.ChildAdded:Connect(function(child)
-            if child.Name~="Target" then return end
+        targetWatchConn = myTop.ChildAdded:Connect(function(child)
+            if child.Name ~= "Target" then return end
             handleTargetValue(child)
         end)
 
-        -- Watch for Target removed (match ended)
         myTop.ChildRemoved:Connect(function(child)
-            if child.Name~="Target" then return end
-            task.delay(2, function()
+            if child.Name ~= "Target" then return end
+            task.delay(0.5, function()
                 if not viewer.autoEnabled then return end
-                local t2=workspace.Tops:FindFirstChild(myId)
+                local t2 = workspace.Tops:FindFirstChild(myId)
                 if not t2 or not t2:FindFirstChild("Target") then
                     clearOpponent()
                 end
@@ -3032,339 +3303,249 @@ local function startAutoOpponentViewer()
         end)
     end
 
-    -- Watch for my top appearing/disappearing
-    local topsAddedConn=workspace.Tops.ChildAdded:Connect(function(top)
+    local topsAddedConn = workspace.Tops.ChildAdded:Connect(function(top)
         if not viewer.autoEnabled then return end
-        if top.Name==myId then task.wait(0.3) hookMyTop(top) end
+        if top.Name == myId then task.wait(0.3) hookMyTop(top) end
     end)
-    local topsRemovedConn=workspace.Tops.ChildRemoved:Connect(function(top)
+    local topsRemovedConn = workspace.Tops.ChildRemoved:Connect(function(top)
         if not viewer.autoEnabled then return end
-        if top.Name==myId then hookMyTop(nil) end
+        if top.Name == myId then hookMyTop(nil) end
     end)
 
-    -- Hook existing top immediately
-    local existingTop=workspace.Tops:FindFirstChild(myId)
-    if existingTop then hookMyTop(existingTop) end
+    local existingMyTop = workspace.Tops:FindFirstChild(myId)
+    if existingMyTop then hookMyTop(existingMyTop) end
 
-    -- Watch for IsStadiumFight flipping true on my top so we scan immediately
-    local stadiumFlagConn=nil
-    local function hookStadiumFlag(myTop)
-        if stadiumFlagConn then stadiumFlagConn:Disconnect() stadiumFlagConn=nil end
-        if not myTop then return end
-        stadiumFlagConn=myTop.AttributeChanged:Connect(function(attr)
-            if attr~="IsStadiumFight" then return end
-            if myTop:GetAttribute("IsStadiumFight")==true then
-                proximityInterval=0.5 -- force immediate scan next heartbeat
-                buildCycleList()
-                if #cycleList>0 then
-                    local entry=cycleList[1]
-                    lastOpponentName=entry.name
-                    lastOpponentTop=entry.top
-                    oppStoppedTime=nil
-                    buildViewerGui(entry.name,entry.top)
+    -- ── Multi-opponent cycling ──────────────────────────────────────────────
+    local cycleList = {}
+    local cycleIndex = 1
+    local CYCLE_INTERVAL = 3
+    local cycleLastSwitchTime = 0   -- tick()-based, not dt-accumulator
+
+    local function getAllOpponentsInArena()
+        local myTop = workspace.Tops:FindFirstChild(myId)
+        if not myTop then return {} end
+        local myHealth = myTop:GetAttribute("Health")
+        if not myHealth or myHealth <= 0 then return {} end
+        local ok0, myPivot = pcall(function() return myTop:GetPivot().Position end)
+        if not ok0 then return {} end
+        local ARENA_RADIUS = 45
+        local realPlayers, npcs = {}, {}
+        for _, top in ipairs(workspace.Tops:GetChildren()) do
+            if top.Name == myId then continue end
+            local health = top:GetAttribute("Health")
+            if not health or health <= 0 then continue end
+            local ok, pivot = pcall(function() return top:GetPivot().Position end)
+            if not ok then continue end
+            if (myPivot - pivot).Magnitude > ARENA_RADIUS then continue end
+            local name = getOpponentNameFromTop(top)
+            if isNPCTop(top) then
+                table.insert(npcs, { top = top, name = name })
+            else
+                table.insert(realPlayers, { top = top, name = name })
+            end
+        end
+        if #realPlayers > 0 then return realPlayers end
+        return npcs
+    end
+
+    local function buildCycleList()
+        local found = getAllOpponentsInArena()
+        -- Prioritise real players: if any real player is in found, drop NPCs
+        local hasRealPlayer = false
+        for _, entry in ipairs(found) do
+            if not isNPCTop(entry.top) then hasRealPlayer = true break end
+        end
+        if hasRealPlayer then
+            local filtered = {}
+            for _, entry in ipairs(found) do
+                if not isNPCTop(entry.top) then table.insert(filtered, entry) end
+            end
+            found = filtered
+        end
+        local changed = #found ~= #cycleList
+        if not changed then
+            for i, entry in ipairs(found) do
+                if not cycleList[i] or cycleList[i].top ~= entry.top then
+                    changed = true break
                 end
             end
-        end)
-    end
-    if existingTop then hookStadiumFlag(existingTop) end
-    local oldTopsAddedConn=topsAddedConn
-    workspace.Tops.ChildAdded:Connect(function(top)
-        if top.Name==myId then task.wait(0.3) hookStadiumFlag(top) end
-    end)
-
-    -- VS label scanner: only fires when no current opponent locked in
-    local myName=LocalPlayer.Name
-    local myDisplay=LocalPlayer.DisplayName
-    local function extractVsLabel(text)
-        if not text or text=="" then return nil end
-        local tl=text:lower()
-        if not tl:find(" vs ") then return nil end
-        local left,right=tl:match("^(.-)%s+vs%s+(.+)$")
-        if not left or not right then return nil end
-        left=left:gsub("^%s+",""):gsub("%s+$","")
-        right=right:gsub("^%s+",""):gsub("%s+$","")
-        local myL=myName:lower()
-        local myDL=myDisplay:lower()
-        -- Only proceed if one side is us (use contains check too in case of truncation)
-        local oppL
-        if left==myL or left==myDL or myL:find(left,1,true) or left:find(myL,1,true) or myDL:find(left,1,true) or left:find(myDL,1,true) then
-            oppL=right
-        elseif right==myL or right==myDL or myL:find(right,1,true) or right:find(myL,1,true) or myDL:find(right,1,true) or right:find(myDL,1,true) then
-            oppL=left
-        else return nil end
-        -- Try to resolve to a real player name
-        for _,p in ipairs(Players:GetPlayers()) do
-            if p.Name:lower()==oppL or p.DisplayName:lower()==oppL then return p.Name end
         end
-        -- Could be NPC — return as-is for top search
+        if changed then
+            cycleList = found
+            -- If the currently displayed top is still in the new list, keep showing it
+            -- and just let the normal timer cycle from there
+            local currentStillPresent = false
+            for _, entry in ipairs(found) do
+                if entry.top == lastOpponentTop then
+                    currentStillPresent = true
+                    break
+                end
+            end
+            if not currentStillPresent then
+                cycleIndex = 1
+                cycleLastSwitchTime = -999  -- force immediate switch
+            end
+        end
+        return changed
+    end
+
+    -- ── VS label scanner (fallback when no top locked) ──────────────────────
+    local myName    = LocalPlayer.Name
+    local myDisplay = LocalPlayer.DisplayName
+
+    local function extractVsLabel(text)
+        if not text or text == "" then return nil end
+        local tl = text:lower()
+        if not tl:find(" vs ") then return nil end
+        local left, right = tl:match("^(.-)%s+vs%s+(.+)$")
+        if not left or not right then return nil end
+        left  = left:gsub("^%s+", ""):gsub("%s+$", "")
+        right = right:gsub("^%s+", ""):gsub("%s+$", "")
+        local myL, myDL = myName:lower(), myDisplay:lower()
+        local oppL
+        if left == myL or left == myDL or myL:find(left, 1, true) or left:find(myL, 1, true) then
+            oppL = right
+        elseif right == myL or right == myDL or myL:find(right, 1, true) or right:find(myL, 1, true) then
+            oppL = left
+        else return nil end
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p.Name:lower() == oppL or p.DisplayName:lower() == oppL then return p.Name end
+        end
         return oppL
     end
 
-    -- Try to find an NPC top matching a name string
     local function resolveTopByName(oppL)
-        local lower=oppL:lower()
-        -- Real player first
-        for _,p in ipairs(Players:GetPlayers()) do
-            if p.Name:lower()==lower or p.DisplayName:lower()==lower then
+        local lower = oppL:lower()
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p.Name:lower() == lower or p.DisplayName:lower() == lower then
                 return workspace.Tops:FindFirstChild(tostring(p.UserId))
             end
         end
-        -- NPC tops — try every possible match
-        for _,top in ipairs(workspace.Tops:GetChildren()) do
+        for _, top in ipairs(workspace.Tops:GetChildren()) do
             if isNPCTop(top) then
-                local topLower=top.Name:lower()
-                -- Direct contains match either way
-                if topLower:find(lower,1,true) or lower:find(topLower,1,true) then
-                    return top
-                end
-                -- Word-token overlap (e.g. "park computer" vs "parkcomputer")
-                local function tokens(s)
-                    local t={} for w in s:gmatch("%a+") do t[#t+1]=w end return t
-                end
-                local oppTokens=tokens(lower)
-                local topTokens=tokens(topLower)
-                local matched=0
-                for _,ot in ipairs(oppTokens) do
-                    for _,tt in ipairs(topTokens) do
-                        if ot==tt then matched+=1 end
-                    end
-                end
-                if matched>0 then return top end
-                -- Check Owner StringValue or ObjectValue name
-                local ov=top:FindFirstChild("Owner")
+                local topLower = top.Name:lower()
+                if topLower:find(lower, 1, true) or lower:find(topLower, 1, true) then return top end
+                local ov = top:FindFirstChild("Owner")
                 if ov then
-                    local ovStr=""
-                    if ov:IsA("StringValue") then ovStr=ov.Value:lower()
-                    elseif ov:IsA("ObjectValue") and ov.Value then
-                        ovStr=tostring(ov.Value.Name or ""):lower()
-                    end
-                    if ovStr~="" and (ovStr:find(lower,1,true) or lower:find(ovStr,1,true)) then
-                        return top
-                    end
-                end
-                -- Check NPC name attribute on the top itself
-                local npcName=top:GetAttribute("Name") or top:GetAttribute("NPCName") or top:GetAttribute("ComputerName")
-                if npcName then
-                    local nl=tostring(npcName):lower()
-                    if nl:find(lower,1,true) or lower:find(nl,1,true) then return top end
+                    local ovStr = ""
+                    if ov:IsA("StringValue") then ovStr = ov.Value:lower()
+                    elseif ov:IsA("ObjectValue") and ov.Value then ovStr = tostring(ov.Value.Name or ""):lower() end
+                    if ovStr ~= "" and (ovStr:find(lower, 1, true) or lower:find(ovStr, 1, true)) then return top end
                 end
             end
         end
         return nil
     end
 
-    -- Find the closest non-self top in the same arena as MY top (not player position)
-    local function getClosestOpponentTopInArena()
-        local myTop=workspace.Tops:FindFirstChild(myId)
-        if not myTop then return nil end
-        local myHealth=myTop:GetAttribute("Health")
-        if not myHealth or myHealth<=0 then return nil end
-        local ok0,myPivot=pcall(function() return myTop:GetPivot().Position end)
-        if not ok0 then return nil end
-        -- Try to get actual arena radius from workspace
-        local ARENA_RADIUS=35 -- conservative default
-        pcall(function()
-            -- Check if there's an arena model we can measure
-            local stadiums=workspace.Map:FindFirstChild("Stadiums") or workspace.Map:FindFirstChild("Arenas") or workspace.Map:FindFirstChild("Stadium")
-            if stadiums then
-                for _,stadium in ipairs(stadiums:GetChildren()) do
-                    local ok2,pos=pcall(function() return stadium:GetPivot().Position end)
-                    if ok2 then
-                        local d=(myPivot-pos).Magnitude
-                        if d<60 then
-                            -- Find bounding size of this stadium
-                            local ok3,cf,size=pcall(function() return stadium:GetBoundingBox() end)
-                            if ok3 and size then
-                                ARENA_RADIUS=math.min(size.X,size.Z)/2*0.6
-                            end
-                            break
-                        end
+    -- ── Heartbeat: proximity scanner + cycling ──────────────────────────────
+    -- Runs immediately on first tick (no accumulated interval guard at the top)
+    local proximityLastRun = 0
+    local PROXIMITY_INTERVAL = 0.5
+
+    local proximityConn = RunService.Heartbeat:Connect(function()
+        if not viewer.autoEnabled then return end
+
+        local now = tick()
+
+        -- ── Step 1: check if current opponent's top has stopped ────────────
+        -- Only clear if the top actually left workspace, not just hit 0 health
+        -- (hitting 0 in tournament means match ended, top is still present briefly)
+        if lastOpponentTop then
+            if not lastOpponentTop.Parent then
+                lastOpponentTop = nil
+                lastOpponentName = nil
+                oppStoppedTime = nil
+                cycleLastSwitchTime = -999
+            else
+                oppStoppedTime = nil
+            end
+        else
+            oppStoppedTime = nil
+        end
+
+        -- ── Step 2: throttle the rest ──────────────────────────────────────
+        if now - proximityLastRun < PROXIMITY_INTERVAL then return end
+        proximityLastRun = now
+
+        -- ── Step 3: don't run if Target watcher already has a live lock ────
+        local myTop = workspace.Tops:FindFirstChild(myId)
+        local targetChild = myTop and myTop:FindFirstChild("Target")
+        local targetTop = targetChild and targetChild.Value
+        if targetTop and targetTop.Parent then
+            local h = targetTop:GetAttribute("Health")
+            if h and h > 0 then return end  -- live Target, let the watcher handle it
+        end
+
+        -- ── Step 4: need my top to be spinning AND in arena ───────────────
+        if not myTop then return end
+        local myHealth = myTop:GetAttribute("Health")
+        if not myHealth or myHealth <= 0 then return end
+        if myTop:GetAttribute("IsStadiumFight") ~= true then
+            if lastOpponentName then clearOpponent() end
+            return
+        end
+
+        -- ── Step 5: rebuild opponent list ─────────────────────────────────
+        buildCycleList()
+
+        if #cycleList == 0 then
+            -- No live opponents found — fall back to VS label scanner
+            if lastOpponentName then return end  -- keep showing last if we have one
+            for _, gui in ipairs(playerGui:GetChildren()) do
+                if not gui:IsA("ScreenGui") or not gui.Enabled then continue end
+                local function collectLabels(inst, out)
+                    for _, child in ipairs(inst:GetChildren()) do
+                        if child:IsA("TextLabel") and child.Visible then table.insert(out, child.Text) end
+                        collectLabels(child, out)
+                    end
+                end
+                local labels = {}
+                collectLabels(gui, labels)
+                for _, text in ipairs(labels) do
+                    local opp = extractVsLabel(text)
+                    if opp and opp ~= lastOpponentName then
+                        local oppTop = resolveTopByName(opp)
+                        openForOpponent(oppTop, oppTop and nil or opp)
+                        return
                     end
                 end
             end
-        end)
-        ARENA_RADIUS=math.clamp(ARENA_RADIUS,20,45)
-        local closest=nil local closestDist=math.huge
-        -- Prefer real players over NPCs
-        local closestReal=nil local closestRealDist=math.huge
-        for _,top in ipairs(workspace.Tops:GetChildren()) do
-            if top.Name==myId then continue end
-            local health=top:GetAttribute("Health")
-            if not health or health<=0 then continue end
-            local ok,pivot=pcall(function() return top:GetPivot().Position end)
-            if not ok then continue end
-            local dist=(myPivot-pivot).Magnitude
-            if dist>ARENA_RADIUS then continue end
-            if not isNPCTop(top) then
-                if dist<closestRealDist then closestReal=top closestRealDist=dist end
-            else
-                if dist<closestDist then closest=top closestDist=dist end
-            end
+            return
         end
-        -- Always prefer real player over NPC
-        return closestReal or closest
-    end
 
-    local STOPPED_CLEAR_DELAY=4 -- seconds after 0 RPM before we unlock
-    local scanInterval=0
-    local guiScanConn=RunService.Heartbeat:Connect(function(dt)
-        if not viewer.autoEnabled then return end
-        -- Re-clear opponent only after they've been at 0 RPM for a few seconds
-        -- Re-clear opponent only after they've been at 0 RPM for a few seconds
-        if lastOpponentName and lastOpponentTop then
-            local h=lastOpponentTop:GetAttribute("Health")
-            local topGone=not lastOpponentTop.Parent
-            local topStopped=(h ~= nil and h<=0)
-            if topGone or topStopped then
-                if not oppStoppedTime then oppStoppedTime=tick() end
-                if tick()-oppStoppedTime >= STOPPED_CLEAR_DELAY then
-                    lastOpponentName=nil lastOpponentTop=nil oppStoppedTime=nil
-                end
-                -- While in stopped-delay, block everything else from running
-                return
-            else
-                oppStoppedTime=nil
-            end
-        else
-            oppStoppedTime=nil
-        end
-        -- Only use VS scan as a fallback when we have no locked opponent
-        if lastOpponentName then return end
-        scanInterval+=dt
-        if scanInterval<0.5 then return end
-        scanInterval=0
-        for _,gui in ipairs(playerGui:GetChildren()) do
-            if not gui:IsA("ScreenGui") or not gui.Enabled then continue end
-            local function collectLabels(inst, out)
-                for _,child in ipairs(inst:GetChildren()) do
-                    if child:IsA("TextLabel") and child.Visible then table.insert(out,child.Text) end
-                    collectLabels(child,out)
-                end
-            end
-            local labels={}
-            collectLabels(gui,labels)
-            for _,text in ipairs(labels) do
-                local opp=extractVsLabel(text)
-                if opp and opp~=lastOpponentName then
-                    -- Try to find their top
-                    local oppTop=resolveTopByName(opp)
-                    openForOpponent(oppTop, oppTop and nil or opp)
-                    return
-                end
-            end
-        end
-    end)
-
-    -- Multi-opponent cycling state
-    local cycleList={}
-    local cycleIndex=1
-    local cycleTimer=0
-    local CYCLE_INTERVAL=3
-
-    local function getAllOpponentsInArena()
-        local myTop=workspace.Tops:FindFirstChild(myId)
-        if not myTop then return {} end
-        local myHealth=myTop:GetAttribute("Health")
-        if not myHealth or myHealth<=0 then return {} end
-        local ok0,myPivot=pcall(function() return myTop:GetPivot().Position end)
-        if not ok0 then return {} end
-        local ARENA_RADIUS=45
-        local realPlayers={} local npcs={}
-        for _,top in ipairs(workspace.Tops:GetChildren()) do
-            if top.Name==myId then continue end
-            local health=top:GetAttribute("Health")
-            if not health or health<=0 then continue end
-            local ok,pivot=pcall(function() return top:GetPivot().Position end)
-            if not ok then continue end
-            local dist=(myPivot-pivot).Magnitude
-            if dist>ARENA_RADIUS then continue end
-            local name=getOpponentNameFromTop(top)
-            if isNPCTop(top) then
-                table.insert(npcs,{top=top,name=name})
-            else
-                table.insert(realPlayers,{top=top,name=name})
-            end
-        end
-        if #realPlayers>0 then return realPlayers end
-        return npcs
-    end
-
-    local function buildCycleList()
-        local found=getAllOpponentsInArena()
-        if #found~=#cycleList then
-            cycleList=found cycleIndex=1 cycleTimer=0 return true
-        end
-        for i,entry in ipairs(found) do
-            if not cycleList[i] or cycleList[i].top~=entry.top then
-                cycleList=found cycleIndex=1 cycleTimer=0 return true
-            end
-        end
-        return false
-    end
-
-    local proximityInterval=0
-    local proximityConn=RunService.Heartbeat:Connect(function(dt)
-        if not viewer.autoEnabled then return end
-        proximityInterval+=dt
-        if proximityInterval<0.5 then return end
-        proximityInterval=0
-
-        -- If Target is set, the hookMyTop/Target watcher handles it — don't interfere
-        local myTop=workspace.Tops:FindFirstChild(myId)
-        local hasTarget=myTop and myTop:FindFirstChild("Target")
-        local targetTop=hasTarget and hasTarget.Value
-        if targetTop and targetTop.Parent then return end
-        -- Only scan proximity if MY top is in a stadium fight OR has health (just launched)
-        local myHealth=myTop and myTop:GetAttribute("Health")
-        if not myTop or (myTop:GetAttribute("IsStadiumFight")~=true and (not myHealth or myHealth<=0)) then return end
-
-        -- Scan arena for all spinning opponents
-        local changed=buildCycleList()
-        if #cycleList==0 then
-            -- Nothing spinning in arena
-            -- Only clear if we're not in the middle of the stopped-delay
-            if lastOpponentName and not oppStoppedTime then
-                lastOpponentName=nil lastOpponentTop=nil
-                buildViewerGui("Waiting for beyblade...",nil)
-            elseif lastOpponentName and oppStoppedTime then
-                -- Waiting for delay to expire, don't touch anything
-                return
+        -- ── Step 6: single opponent ────────────────────────────────────────
+        if #cycleList == 1 then
+            local entry = cycleList[1]
+            if lastOpponentTop ~= entry.top then
+                lastOpponentName = entry.name
+                lastOpponentTop  = entry.top
+                oppStoppedTime   = nil
+                cycleLastSwitchTime = tick()
+                buildViewerGui(entry.name, entry.top)
             end
             return
         end
 
-        -- Single opponent
-        if #cycleList==1 then
-            local entry=cycleList[1]
-            if lastOpponentTop~=entry.top then
-                lastOpponentName=entry.name
-                lastOpponentTop=entry.top
-                oppStoppedTime=nil
-                buildViewerGui(entry.name,entry.top)
-            end
-            return
-        end
+        -- ── Step 7: multiple opponents — cycle on wall-clock timer ─────────
+        -- Switch immediately on first detection (cycleLastSwitchTime == 0)
+        if now - cycleLastSwitchTime < CYCLE_INTERVAL then return end
+        cycleLastSwitchTime = now
 
-        -- Multiple opponents: cycle only on timer, never mid-cycle
-        cycleTimer+=0.5
-        if cycleTimer>=CYCLE_INTERVAL then
-            cycleTimer=0
-            if cycleIndex>#cycleList then cycleIndex=1 end
-            local entry=cycleList[cycleIndex]
-            -- Only rebuild if actually switching to a different top
-            if lastOpponentTop~=entry.top then
-                lastOpponentName=entry.name
-                lastOpponentTop=entry.top
-                oppStoppedTime=nil
-                buildViewerGui(entry.name,entry.top)
-            end
-            cycleIndex+=1
-            if cycleIndex>#cycleList then cycleIndex=1 end
+        if cycleIndex > #cycleList then cycleIndex = 1 end
+        local entry = cycleList[cycleIndex]
+        cycleIndex += 1
+        if cycleIndex > #cycleList then cycleIndex = 1 end
+
+        if lastOpponentTop ~= entry.top then
+            lastOpponentName = entry.name
+            lastOpponentTop  = entry.top
+            oppStoppedTime   = nil
+            buildViewerGui(entry.name, entry.top)
         end
     end)
 
-    viewer.autoConn=guiScanConn
-    viewer._extraConns={topsAddedConn,topsRemovedConn,proximityConn}
+    viewer.autoConn = proximityConn
+    viewer._extraConns = { topsAddedConn, topsRemovedConn }
 end
 
 local function stopAutoOpponentViewer()
@@ -3472,8 +3653,9 @@ MiscLeft:AddToggle('AntiAFK',{Text='Anti AFK',Default=startFlags.AntiAFK,Callbac
 if startFlags.AntiAFK then onAntiAFK(true) end
 
 -- ── Mod Notifier ──────────────────────────────────────────────────────────────
+do
 local MOD_GROUP_ID = 32975736
-local MOD_MIN_RANK = 50 -- adjust after testing, higher = more senior roles
+local MOD_MIN_RANK = 50
 local modNotifierConn = nil
 local knownModStatus = {}
 
@@ -3492,6 +3674,26 @@ local function getGroupRank(userId)
     return 0
 end
 
+local function buildModAlert(playerName, rank)
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "ModAlert" sg.ResetOnSpawn = false
+    sg.DisplayOrder = 9999 sg.Parent = playerGui
+    local frame = Instance.new("Frame")
+    frame.BackgroundColor3 = Color3.fromRGB(200,30,30)
+    frame.BackgroundTransparency = 0.15 frame.BorderSizePixel = 0
+    frame.Size = UDim2.new(0,340,0,70)
+    frame.Position = UDim2.new(0.5,-170,0,60) frame.Parent = sg
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0,8)
+    local lbl = Instance.new("TextLabel")
+    lbl.BackgroundTransparency = 1 lbl.Size = UDim2.new(1,0,1,0)
+    lbl.Font = Enum.Font.GothamBold lbl.TextSize = 16
+    lbl.TextColor3 = Color3.fromRGB(255,255,255)
+    lbl.TextStrokeTransparency = 0 lbl.TextStrokeColor3 = Color3.fromRGB(0,0,0)
+    lbl.Text = "⚠ MOD DETECTED: "..playerName.."\nRank: "..rank
+    lbl.Parent = frame
+    task.delay(8, function() pcall(function() sg:Destroy() end) end)
+end
+
 local function checkPlayerForMod(player)
     if player == LocalPlayer then return end
     if knownModStatus[player.UserId] ~= nil then return end
@@ -3500,25 +3702,7 @@ local function checkPlayerForMod(player)
         local rank = getGroupRank(player.UserId)
         if rank >= MOD_MIN_RANK then
             knownModStatus[player.UserId] = true
-            -- On-screen alert
-            local sg = Instance.new("ScreenGui")
-            sg.Name = "ModAlert" sg.ResetOnSpawn = false
-            sg.DisplayOrder = 9999 sg.Parent = playerGui
-            local frame = Instance.new("Frame")
-            frame.BackgroundColor3 = Color3.fromRGB(200,30,30)
-            frame.BackgroundTransparency = 0.15 frame.BorderSizePixel = 0
-            frame.Size = UDim2.new(0,340,0,70)
-            frame.Position = UDim2.new(0.5,-170,0,60) frame.Parent = sg
-            Instance.new("UICorner", frame).CornerRadius = UDim.new(0,8)
-            local lbl = Instance.new("TextLabel")
-            lbl.BackgroundTransparency = 1 lbl.Size = UDim2.new(1,0,1,0)
-            lbl.Font = Enum.Font.GothamBold lbl.TextSize = 16
-            lbl.TextColor3 = Color3.fromRGB(255,255,255)
-            lbl.TextStrokeTransparency = 0 lbl.TextStrokeColor3 = Color3.fromRGB(0,0,0)
-            lbl.Text = "⚠ MOD DETECTED: "..player.Name.."\nRank: "..rank
-            lbl.Parent = frame
-            -- Auto dismiss after 8 seconds
-            task.delay(8, function() pcall(function() sg:Destroy() end) end)
+            buildModAlert(player.Name, rank)
             Notify("Mod Notifier", "MOD IN SERVER: "..player.Name, 8)
         end
     end)
@@ -3526,13 +3710,8 @@ end
 
 local function startModNotifier()
     knownModStatus = {}
-    for _, p in ipairs(Players:GetPlayers()) do
-        checkPlayerForMod(p)
-    end
-    modNotifierConn = Players.PlayerAdded:Connect(function(p)
-        task.wait(1)
-        checkPlayerForMod(p)
-    end)
+    for _, p in ipairs(Players:GetPlayers()) do checkPlayerForMod(p) end
+    modNotifierConn = Players.PlayerAdded:Connect(function(p) task.wait(1) checkPlayerForMod(p) end)
 end
 
 local function stopModNotifier()
@@ -3568,6 +3747,8 @@ MiscLeft:AddToggle('KickOnMod', {
         end)
     end,
 })
+
+end
 
 MiscRight:AddButton('Rejoin',function()
     Notify("Rejoin","Rejoining...",2) task.wait(0.5) TeleportService:Teleport(game.PlaceId,LocalPlayer)
