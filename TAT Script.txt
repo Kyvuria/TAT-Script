@@ -1398,6 +1398,7 @@ MainLeft:AddDropdown('AutoSwitchBlacklist', {
     end,
 })
 
+do
 -- ── Auto Switch Style ─────────────────────────────────────────────────────────
 local OPPONENT_HISTORY_FILE = "TAT_OpponentHistory.json"
 
@@ -1764,24 +1765,6 @@ local TYPE_LIST_STYLE = {"Attack", "Stamina", "Defense", "Balance"}
 local MAP_LIST = {"Classic Stadium", "Cage Stadium", "Ice Stadium", "Ice Walls Stadium", "Spinning Disc Stadium", "Spinning Arm Stadium", "Sand Stadium", "Rusty Stadium"}
 
 if not autoStyleState.mapBlacklist then autoStyleState.mapBlacklist = {} end
-
-local function getCurrentTournamentMap()
-    local ok, eventStadium = pcall(function() return workspace.Map.Stadiums:FindFirstChild("Event Stadium") end)
-    if not ok or not eventStadium then return nil end
-    local core = eventStadium:FindFirstChild("Core")
-    local weight = core and core:GetAttribute("Weight")
-    for _, v in ipairs(eventStadium:GetDescendants()) do
-        if v.Name == "Cage Controller Script" then return "Cage Stadium" end
-        if v.Name == "Wall Controller Script" then return "Ice Walls Stadium" end
-        if v.Name == "Disc Controller Script" then return "Spinning Disc Stadium" end
-        if v.Name == "Arm Controller" then return "Spinning Arm Stadium" end
-        if v.Name == "Tournament Three Sound" then return "Sand Stadium" end
-    end
-    if weight == 50 then return "Classic Stadium" end
-    if weight == 40 then return "Ice Stadium" end
-    if weight == 35 then return "Rusty Stadium" end
-    return nil
-end
 
 for _, typeName in ipairs(TYPE_LIST_STYLE) do
     MainLeft:AddDropdown('AutoStyleCounter_'..typeName, {
@@ -2803,19 +2786,6 @@ local function buildViewerGui(playerName,top)
         return nil
     end
 
-    -- Maps raw mode attribute values to display strings per part name
-    local PART_MODE_DISPLAY = {
-        -- Belts
-        ["Upper"]   = {["1"]="Blades On", ["2"]="Blades Off", [1]="Blades On", [2]="Blades Off", ["true"]="Blades On", ["false"]="Blades Off"},
-        ["Shift"]   = {["1"]="High",      ["2"]="Low",        [1]="High",      [2]="Low"},
-        ["Locking"] = {["1"]="Attack",    ["2"]="Defense",    [1]="Attack",    [2]="Defense"},
-        ["Talon"]   = {["1"]="Unlocked",  ["2"]="Locked",     [1]="Unlocked",  [2]="Locked",  ["true"]="Unlocked", ["false"]="Locked"},
-        -- Bodies
-        ["Dire"]    = {["1"]="Defense",   ["2"]="Counter",    [1]="Defense",   [2]="Counter"},
-        ["Shock"]   = {["1"]="Assault",   ["2"]="Barrage",    [1]="Assault",   [2]="Barrage"},
-        ["Radiant"] = {["1"]="Stamina",   ["2"]="Attack",     [1]="Stamina",   [2]="Attack"},
-    }
-
     local function resolveMode(partInstanceName, rawMode)
         if not rawMode then return nil end
         -- Try to find a matching display table by checking if partInstanceName contains a known key
@@ -3569,6 +3539,8 @@ ESPViewer:AddToggle('AutoOpponentViewer',{
         end
     end,
 })
+
+end -- close Auto Switch Style do block
 
 -- ── Misc Tab ──────────────────────────────────────────────────────────────────
 local MiscLeft  = Tabs.Misc:AddLeftGroupbox('Character')
