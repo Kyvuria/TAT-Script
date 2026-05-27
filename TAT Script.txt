@@ -962,8 +962,8 @@ local function getPartModeOptions(partName)
     if not partInHand then return {"Mode 1", "Mode 2"}, nil end
     
     -- Look up modes for this part
-    for partKey, modeMap in pairs(PART_MODE_DISPLAY) do
-        if partInHand:lower():find(partKey:lower(), 1, true) then
+    for partKey, modeMap in pairs(PART_MODE_DISPLAY or {}) do
+        if partInHand and partInHand:lower():find(partKey:lower(), 1, true) then
             local options = {}
             -- modeMap has keys "1","2" etc
             local i = 1
@@ -980,50 +980,18 @@ end
 
 local function findPartModeButton(partType, modeIndex)
     task.wait(0.2)
-    local partLower = partType:lower()
-    for _, gui in ipairs(playerGui:GetChildren()) do
-        if not gui:IsA("ScreenGui") or not gui.Enabled then continue end
-        local function searchForButtons(inst, depth)
-            if depth > 8 then return nil end
-            for _, child in ipairs(inst:GetChildren()) do
-                if not child.Visible then continue end
-                local hasPartType = false
-                local function checkForPartType(c, d)
-                    if hasPartType or d > 3 then return end
-                    if c:IsA("TextLabel") or c:IsA("TextButton") then
-                        local t = (c.Text or ""):lower()
-                        if t == partLower or t:sub(1, #partLower) == partLower then
-                            hasPartType = true
-                            return
-                        end
-                    end
-                    for _, ch in ipairs(c:GetChildren()) do checkForPartType(ch, d+1) end
-                end
-                checkForPartType(child, 0)
-                if hasPartType then
-                    local buttons = {}
-                    local function collectButtons(c)
-                        for _, b in ipairs(c:GetChildren()) do
-                            if b:IsA("TextButton") and b.Visible and b.Text ~= "" and b.Text:lower() ~= partLower then
-                                table.insert(buttons, b)
-                            end
-                            collectButtons(b)
-                        end
-                    end
-                    collectButtons(child)
-                    table.sort(buttons, function(a, b)
-                        return a.AbsolutePosition.X < b.AbsolutePosition.X
-                    end)
-                    if #buttons >= modeIndex then
-                        return buttons[modeIndex]
-                    end
-                end
-                local found = searchForButtons(child, depth + 1)
-                if found then return found end
-            end
-            return nil
-        end
-        local btn = searchForButtons(gui, 0)
+    local hud = playerGui:FindFirstChild("HUD")
+    if not hud then return nil end
+    local modesGui = hud:FindFirstChild("Modes")
+    if not modesGui then return nil end
+    local list = modesGui:FindFirstChild("List")
+    if not list then return nil end
+
+    local targetName = partType .. "_" .. modeIndex  -- e.g. "Body_1", "Belt_2"
+    for _, template in ipairs(list:GetChildren()) do
+        local modesFolder = template:FindFirstChild("Modes")
+        if not modesFolder then continue end
+        local btn = modesFolder:FindFirstChild(targetName)
         if btn then return btn end
     end
     return nil
@@ -1041,40 +1009,56 @@ local function doPartModeSwitch()
         VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.N, false, game)
         task.wait(0.05)
         VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.N, false, game)
-        task.wait(0.5)
+        task.wait(0.3)
 
-        local bodyBtn = findPartModeButton("Body", autoPartMode.bodyMode)
-        if bodyBtn then
-            local pos = bodyBtn.AbsolutePosition
-            local size = bodyBtn.AbsoluteSize
-            local cx = math.floor(pos.X + size.X / 2)
-            local cy = math.floor(pos.Y + size.Y / 2)
-            VirtualInputManager:SendMouseMoveEvent(cx, cy, game)
-            task.wait(0.05)
-            VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
-            task.wait(0.05)
-            VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
-            task.wait(0.2)
+        -- Find buttons directly using known structure
+        local hud = playerGui:FindFirstChild("HUD")
+        local modesList = hud and hud:FindFirstChild("Modes") and hud.Modes:FindFirstChild("List")
+
+        local bodyBtn = nil
+        local beltBtn = nil
+
+        if modesList then
+            for _, template in ipairs(modesList:GetChildren()) do
+                local modesFolder = template:FindFirstChild("Modes")
+                if not modesFolder then continue end
+                local b = modesFolder:FindFirstChild("Body_" .. autoPartMode.bodyMode)
+                if b then bodyBtn = b end
+                local bl = modesFolder:FindFirstChild("Belt_" .. autoPartMode.beltMode)
+                if bl then beltBtn = bl end
+            end
         end
 
-        local beltBtn = findPartModeButton("Belt", autoPartMode.beltMode)
-        if beltBtn then
-            local pos = beltBtn.AbsolutePosition
-            local size = beltBtn.AbsoluteSize
-            local cx = math.floor(pos.X + size.X / 2)
-            local cy = math.floor(pos.Y + size.Y / 2)
+        if bodyBtn and bodyBtn.Parent then
+            local cx = autoPartMode.bodyMode == 1 and 1501 or 1679
+            local cy = 919
             VirtualInputManager:SendMouseMoveEvent(cx, cy, game)
             task.wait(0.05)
             VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
             task.wait(0.05)
             VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
-            task.wait(0.2)
+            task.wait(0.1)
+        end
+
+        if beltBtn and beltBtn.Parent then
+            local cx = autoPartMode.beltMode == 1 and 1494 or 1680
+            local cy = 728
+            VirtualInputManager:SendMouseMoveEvent(cx, cy, game)
+            task.wait(0.05)
+            VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
+            task.wait(0.05)
+            VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
+            task.wait(0.1)
         end
 
         task.wait(0.1)
         VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.N, false, game)
         task.wait(0.05)
         VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.N, false, game)
+
+        -- Reset mouse to center so it doesn't stay on the button
+        local screenSize = workspace.CurrentCamera.ViewportSize
+        VirtualInputManager:SendMouseMoveEvent(math.floor(screenSize.X/2), math.floor(screenSize.Y/2), game)
 
         autoPartMode.isSwitching = false
     end)
@@ -1101,25 +1085,33 @@ end
 
 local function startAutoPartMode()
     if autoPartModeConn then autoPartModeConn:Disconnect() autoPartModeConn = nil end
-    
-    -- Switch immediately on enable
+
     doPartModeSwitch()
-    
-    -- Watch for top being picked up (leaves workspace = was recalled/picked up)
+
     local lastTopPresent = getMyTopForPartMode() ~= nil
-    autoPartModeConn = RunService.Heartbeat:Connect(function()
+
+    autoPartModeConn = RunService.Heartbeat:Connect(function(dt)
         if not autoPartMode.enabled then return end
-        
+        if autoPartMode.isSwitching then return end
+
         local topNow = getMyTopForPartMode()
         local topPresent = topNow ~= nil
-        
-        -- Top just disappeared (picked up or recalled) — switch modes now
+
+        -- Top just disappeared = picked up or recalled, switch modes
         if lastTopPresent and not topPresent then
-            task.wait(0.5) -- brief wait for pickup animation
-            doPartModeSwitch()
+            local inTourney = false
+            for _, top in ipairs(workspace.Tops:GetChildren()) do
+                if top:GetAttribute("IsStadiumFight") == true then
+                    inTourney = true break
+                end
+            end
+            if not inTourney then
+                task.wait(0.5)
+                doPartModeSwitch()
+            end
         end
-        
-        -- Also refresh dropdowns if part changes detected
+
+        -- Refresh dropdowns if parts changed
         if topNow then
             local bodyPart = topNow:FindFirstChild("Body")
             local beltPart = topNow:FindFirstChild("Belt")
@@ -1131,7 +1123,7 @@ local function startAutoPartMode()
                 refreshPartModeDropdowns()
             end
         end
-        
+
         lastTopPresent = topPresent
     end)
 end
@@ -1166,6 +1158,7 @@ bodyModeDropdown = MainLeft:AddDropdown('AutoPartModeBody', {
         for i, v in ipairs(opts) do
             if v == value then autoPartMode.bodyMode = i break end
         end
+        if autoPartMode.enabled then doPartModeSwitch() end
     end,
 })
 
@@ -1178,6 +1171,7 @@ beltModeDropdown = MainLeft:AddDropdown('AutoPartModeBelt', {
         for i, v in ipairs(opts) do
             if v == value then autoPartMode.beltMode = i break end
         end
+        if autoPartMode.enabled then doPartModeSwitch() end
     end,
 })
 
