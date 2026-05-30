@@ -2433,8 +2433,20 @@ local function buildViewerGui(playerName, top)
     makeRow("Type:",typeStr,Color3.fromRGB(160,160,180),typeDisplayColor,y) y+=20
     makeRow("ATK:",_topAttr(top,"Attack"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,80,80),y) y+=20
     makeRow("DEF:",_topAttr(top,"Defense"),Color3.fromRGB(160,160,180),Color3.fromRGB(80,220,80),y) y+=20
-    makeRow("STA:",_topAttr(top,"Stamina"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,200,0),y) y+=22
-    makeDivider(y) y+=4
+    makeRow("STA:",_topAttr(top,"Stamina"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,200,0),y) y+=20
+
+local rawStyleType = top:GetAttribute("LaunchType") or top:GetAttribute("Type") or top:GetAttribute("Style") or "?"
+local styleTypeStr = tostring(rawStyleType)
+local typeMap2 = {Attack="Rush", Stamina="Focused", Defense="Bunker", Balance="Wobble", Standard="Standard"}
+local styleDisplay = typeMap2[styleTypeStr] or styleTypeStr
+local styleColor
+if styleDisplay:lower():find("rush") then styleColor=Color3.fromRGB(255,60,60)
+elseif styleDisplay:lower():find("focus") then styleColor=Color3.fromRGB(255,200,0)
+elseif styleDisplay:lower():find("bunker") then styleColor=Color3.fromRGB(80,200,80)
+elseif styleDisplay:lower():find("wobble") then styleColor=Color3.fromRGB(180,80,255)
+else styleColor=Color3.fromRGB(200,200,200) end
+makeRow("Style:",styleDisplay,Color3.fromRGB(160,160,180),styleColor,y) y+=22
+makeDivider(y) y+=4
 
     local rpmLabel=Instance.new("TextLabel") rpmLabel.BackgroundTransparency=1 rpmLabel.Size=UDim2.new(0.32,0,0,18) rpmLabel.Position=UDim2.new(0,0,0,y) rpmLabel.Font=Enum.Font.GothamBold rpmLabel.TextSize=11 rpmLabel.TextColor3=Color3.fromRGB(160,160,180) rpmLabel.TextXAlignment=Enum.TextXAlignment.Left rpmLabel.Text="RPM:" rpmLabel.Parent=content
     local rpmValLabel=Instance.new("TextLabel") rpmValLabel.BackgroundTransparency=1 rpmValLabel.Size=UDim2.new(0.38,0,0,18) rpmValLabel.Position=UDim2.new(0.32,0,0,y) rpmValLabel.Font=Enum.Font.GothamBold rpmValLabel.TextSize=11 rpmValLabel.TextColor3=Color3.fromRGB(0,200,255) rpmValLabel.TextXAlignment=Enum.TextXAlignment.Left rpmValLabel.Text="..." rpmValLabel.Parent=content
@@ -2954,7 +2966,7 @@ local ok2,err2=pcall(function()
     SaveManager:SetIgnoreIndexes({'UIToggleKeybind','PreferredState',
         'AutoSwitch_Enable_Attack','AutoSwitch_Enable_Stamina','AutoSwitch_Enable_Defense','AutoSwitch_Enable_Balance',
         'AutoSwitch_Threshold_Attack','AutoSwitch_Threshold_Stamina','AutoSwitch_Threshold_Defense','AutoSwitch_Threshold_Balance',
-        'AutoSwitchBlacklist','AutoSwitchState','AutoSwitchTargetState'
+        'AutoSwitchBlacklist','AutoSwitchTargetState'
     })
     SaveManager:BuildConfigSection(Tabs.Config)
 end)
