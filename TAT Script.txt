@@ -155,13 +155,15 @@ end
 
 -- ── Part mode display table ───────────────────────────────────────────────────
 local PART_MODE_DISPLAY = {
-    ["Upper"]   = {["1"]="Blades On",  ["2"]="Blades Off",  [1]="Blades On",  [2]="Blades Off"},
-    ["Shift"]   = {["1"]="High",       ["2"]="Low",         [1]="High",       [2]="Low"},
-    ["Locking"] = {["1"]="Attack",     ["2"]="Defense",     [1]="Attack",     [2]="Defense"},
-    ["Talon"]   = {["1"]="Unlocked",   ["2"]="Locked",      [1]="Unlocked",   [2]="Locked"},
-    ["Dire"]    = {["1"]="Defense",    ["2"]="Counter",     [1]="Defense",    [2]="Counter"},
-    ["Shock"]   = {["1"]="Assault",    ["2"]="Barrage",     [1]="Assault",    [2]="Barrage"},
-    ["Radiant"] = {["1"]="Stamina",    ["2"]="Attack",      [1]="Stamina",    [2]="Attack"},
+    ["Upper"]     = {["1"]="Blades On",  ["2"]="Blades Off",  [1]="Blades On",  [2]="Blades Off"},
+    ["Shift"]     = {["1"]="High",       ["2"]="Low",         [1]="High",       [2]="Low"},
+    ["Locking"]   = {["1"]="Attack",     ["2"]="Defense",     [1]="Attack",     [2]="Defense"},
+    ["Talon"]     = {["1"]="Unlocked",   ["2"]="Locked",      [1]="Unlocked",   [2]="Locked"},
+    ["Dire"]      = {["1"]="Defense",    ["2"]="Counter",     [1]="Defense",    [2]="Counter"},
+    ["Shock"]     = {["1"]="Assault",    ["2"]="Barrage",     [1]="Assault",    [2]="Barrage"},
+    ["Radiant"]   = {["1"]="Stamina",    ["2"]="Attack",      [1]="Stamina",    [2]="Attack"},
+    ["Lightning"] = {["1"]="Barrage",    ["2"]="Smash",       [1]="Barrage",    [2]="Smash"},
+    ["Hollow"]    = {["1"]="Sharp",      ["2"]="Flat",        [1]="Sharp",      [2]="Flat"},
 }
 
 -- ── Shared helper functions (defined ONCE at top level) ───────────────────────
@@ -2533,13 +2535,7 @@ makeDivider(y) y+=4
         local isStadium=(top:GetAttribute("IsStadiumFight")==true)
         local myTop=workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
         local myInStadium=myTop and myTop:GetAttribute("IsStadiumFight")==true
-        if not isStadium and not myInStadium then
-            stateValLabel.Text="Not in stadium" stateValLabel.TextColor3=Color3.fromRGB(120,120,120)
-            rpmValLabel.Text="-- / --" rpmValLabel.TextColor3=Color3.fromRGB(120,120,120)
-            rpmPctLabel.Text="--%"  rpmPctLabel.TextColor3=Color3.fromRGB(120,120,120)
-            rpmBarFill.Size=UDim2.new(0,0,1,0) rpmBarFill.BackgroundColor3=Color3.fromRGB(60,60,60)
-            return
-        end
+        -- always show stats even outside stadium
         local state=tostring(top:GetAttribute("State") or "") local isSpinning=LIVE_STATES[state]==true
         local health=top:GetAttribute("Health") or 0 local maxHealth=top:GetAttribute("MaxHealth") or 0
         local currentRPM
