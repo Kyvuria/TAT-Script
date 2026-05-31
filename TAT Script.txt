@@ -3314,6 +3314,86 @@ connections.uiKeybind=UserInputService.InputBegan:Connect(function(input,gp)
     end
 end)
 
+-- ── WEBHOOKS ──────────────────────────────────────────────────────────────────
+local WebhookRight = Tabs.Misc:AddLeftGroupbox('Webhooks')
+
+local webhookState = { url = "", enabled = false, disconnectPinged = false }
+
+local function tryRequest(url, payload)
+    local opts = { Url=url, Method="POST", Headers={["Content-Type"]="application/json"}, Body=payload }
+    if syn and syn.request then pcall(syn.request, opts) return end
+    if http and http.request then pcall(http.request, opts) return end
+    if request then pcall(request, opts) return end
+    if http_request then pcall(http_request, opts) return end
+end
+
+local function sendDisconnectWebhook()
+    if not webhookState.url or webhookState.url == "" then return end
+    local uname = LocalPlayer.Name local dname = LocalPlayer.DisplayName local uid = LocalPlayer.UserId
+    local jobId = tostring(game.JobId):sub(1,8)
+    local avatarUrl = string.format("https://thumbnails.roblox.com/v1/users/avatar?userIds=%d&size=420x420&format=Png&isCircular=false", uid)
+    local payload = HttpService:JSONEncode({
+        content = "@everyone ⚠️ DISCONNECT DETECTED!",
+        embeds  = {{
+            title       = "🔴 DISCONNECTED",
+            description = string.format("**%s** (`@%s`) disconnected!\n\n**Server:** `%s...`", dname, uname, jobId),
+            color       = 15158332,
+            thumbnail   = { url = avatarUrl },
+            footer      = { text = string.format("Requiem | TAT  •  UserID: %d", uid) },
+            timestamp   = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        }}
+    })
+    task.spawn(tryRequest, webhookState.url, payload)
+end
+
+LocalPlayer.OnTeleport:Connect(function(state)
+    if state == Enum.TeleportState.RequestedFromServer then
+        if webhookState.enabled and not webhookState.disconnectPinged then
+            webhookState.disconnectPinged = true
+            sendDisconnectWebhook()
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(4)
+        local ok = pcall(function() return LocalPlayer.Parent ~= nil end)
+        if not ok and webhookState.enabled and not webhookState.disconnectPinged then
+            webhookState.disconnectPinged = true
+            sendDisconnectWebhook()
+            break
+        end
+    end
+end)
+
+WebhookRight:AddToggle('WebhookEnabled', {
+    Text     = 'Enable Disconnect Webhook',
+    Default  = false,
+    Callback = function(value)
+        webhookState.enabled = value
+        if value then
+            if webhookState.url == "" then
+                webhookState.enabled = false
+                pcall(function() Toggles['WebhookEnabled']:SetValue(false) end)
+                return
+            end
+            webhookState.disconnectPinged = false
+        end
+    end,
+})
+
+WebhookRight:AddInput('WebhookURL', {
+    Text     = 'Webhook URL',
+    Default  = '',
+    Numeric  = false,
+    Finished = false,
+    Callback = function(v)
+        webhookState.url = v
+        webhookState.disconnectPinged = false
+    end,
+})
+
 -- ── CONFIG TAB ────────────────────────────────────────────────────────────────
 pcall(function() ThemeManager:SetLibrary(Library) ThemeManager:AttachToTab(Tabs.Config) end)
 local ok2,err2=pcall(function()
