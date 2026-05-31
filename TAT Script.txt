@@ -3328,6 +3328,6 @@ end)
 if not ok2 then warn("SaveManager error: "..tostring(err2)) end
 
 task.spawn(function()
-    task.wait(3)
+    task.wait(1)
     pcall(function() SaveManager:LoadAutoloadConfig() end)
 end)
