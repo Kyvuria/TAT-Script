@@ -673,36 +673,31 @@ end
 
 -- ── Auto Re-Engage ────────────────────────────────────────────────────────────
 local function sendDance()
-    local ok = pcall(function()
+    pcall(function()
         game:GetService("ReplicatedStorage")
             :FindFirstChild("DefaultChatSystemChatEvents")
             :FindFirstChild("SayMessageRequest"):FireServer("/e dance", "All")
     end)
-    if not ok then
-        pcall(function()
-            game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync("/e dance")
-        end)
-    end
-end
-
-local function doReEngage()
-    if reEngageState.cooldown then return end
-    reEngageState.cooldown=true
-    task.spawn(function()
-        while toggleStates.AutoReEngage do
-            sendDance()
-            task.wait(math.random(5,10))
-        end
-        reEngageState.cooldown=false
+    pcall(function()
+        game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync("/e dance")
     end)
 end
+
 local function onAutoReEngage(value)
     toggleStates.AutoReEngage=value
     if connections.autoReEngage then connections.autoReEngage:Disconnect() connections.autoReEngage=nil end
     reEngageState.cooldown=false
     if not value then return end
     reEngageState.wasInBattle=false reEngageState.watchedTop=nil
-    doReEngage()
+    connections.autoReEngage=RunService.Heartbeat:Connect(function()
+        if not toggleStates.AutoReEngage then return end
+        local now=tick()
+        if not reEngageState._nextDance then reEngageState._nextDance=now end
+        if now>=reEngageState._nextDance then
+            reEngageState._nextDance=now+math.random(5,10)
+            task.spawn(sendDance)
+        end
+    end)
 end
 toggleCallbacks["AutoReEngage"]=onAutoReEngage
 
@@ -2949,7 +2944,7 @@ end})
 end -- Mod Notifier do block
 
 MiscRight:AddButton('Rejoin',function()
-    task.wait(0.5) TeleportService:Teleport(game.PlaceId,LocalPlayer)
+    task.wait(0.5) TeleportService:TeleportToPlaceInstance(game.PlaceId,game.JobId,LocalPlayer)
 end)
 MiscRight:AddButton('Server Hop',function()
     task.spawn(function()
