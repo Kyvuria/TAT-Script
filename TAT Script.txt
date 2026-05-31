@@ -2432,7 +2432,8 @@ local function buildViewerGui(playerName, top)
 
     local passionBarFills = {}
     local function makePassionBar(moveNum, moveName, yOffset)
-        local cost = getMoveCost(moveName)
+        local isNone = (not moveName or moveName=="None" or moveName=="none" or moveName=="?")
+        local cost = isNone and 0 or (tonumber(top:GetAttribute("MaxPassion_"..moveNum)) or getMoveCost(moveName))
         local barBG=Instance.new("Frame") barBG.BackgroundColor3=Color3.fromRGB(25,25,35) barBG.BorderSizePixel=0
         barBG.Size=UDim2.new(1,0,0,7) barBG.Position=UDim2.new(0,0,0,yOffset) barBG.Parent=content
         Instance.new("UICorner",barBG).CornerRadius=UDim.new(0,3)
@@ -2442,7 +2443,7 @@ local function buildViewerGui(playerName, top)
         local pLabel=Instance.new("TextLabel") pLabel.BackgroundTransparency=1 pLabel.Size=UDim2.new(1,0,0,7)
         pLabel.Position=UDim2.new(0,0,0,yOffset) pLabel.Font=Enum.Font.GothamBold pLabel.TextSize=9
         pLabel.TextColor3=Color3.fromRGB(180,180,180) pLabel.TextXAlignment=Enum.TextXAlignment.Right
-        pLabel.Text=cost and ("0/"..cost) or "?" pLabel.Parent=content
+        pLabel.Text=(cost and cost>0) and ("0/"..cost) or "0/0" pLabel.Parent=content
         passionBarFills[moveNum]={fill=barFill,label=pLabel,cost=cost}
     end
 
@@ -2537,10 +2538,6 @@ makeDivider(y) y+=4
             rpmValLabel.Text="-- / --" rpmValLabel.TextColor3=Color3.fromRGB(120,120,120)
             rpmPctLabel.Text="--%"  rpmPctLabel.TextColor3=Color3.fromRGB(120,120,120)
             rpmBarFill.Size=UDim2.new(0,0,1,0) rpmBarFill.BackgroundColor3=Color3.fromRGB(60,60,60)
-            for moveNum=1,3 do
-                local bd=passionBarFills[moveNum]
-                if bd and bd.fill and bd.fill.Parent then bd.fill.Size=UDim2.new(0,0,1,0) bd.label.Text="--" end
-            end
             return
         end
         local state=tostring(top:GetAttribute("State") or "") local isSpinning=LIVE_STATES[state]==true
@@ -2570,7 +2567,11 @@ makeDivider(y) y+=4
         for moveNum=1,3 do
             local bd=passionBarFills[moveNum]
             if bd and bd.fill and bd.fill.Parent then
-                local passion=tonumber(top:GetAttribute("Passion_"..moveNum)) or 0
+                local passion=tonumber(top:GetAttribute("Passion_"..moveNum)) or tonumber(top:GetAttribute("Passion"..moveNum)) or 0
+                if passion==0 then
+                    local altPassion=tonumber(top:GetAttribute("Move"..moveNum.."Passion")) or tonumber(top:GetAttribute("passion_"..moveNum))
+                    if altPassion and altPassion>0 then passion=altPassion end
+                end
                 local cost=bd.cost
                 if cost then
                     local fp=math.clamp(passion/math.max(cost,1),0,1)
