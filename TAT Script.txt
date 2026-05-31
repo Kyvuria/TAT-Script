@@ -670,23 +670,28 @@ local function runACBypassTimer()
 end
 
 -- ── Auto Re-Engage ────────────────────────────────────────────────────────────
+local function sendDance()
+    local ok = pcall(function()
+        game:GetService("ReplicatedStorage")
+            :FindFirstChild("DefaultChatSystemChatEvents")
+            :FindFirstChild("SayMessageRequest"):FireServer("/e dance", "All")
+    end)
+    if not ok then
+        pcall(function()
+            game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync("/e dance")
+        end)
+    end
+end
+
 local function doReEngage()
     if reEngageState.cooldown then return end
     reEngageState.cooldown=true
     task.spawn(function()
-        task.wait(1)
-        VirtualInputManager:SendKeyEvent(true,Enum.KeyCode.E,false,game) task.wait(0.15)
-        VirtualInputManager:SendKeyEvent(false,Enum.KeyCode.E,false,game) task.wait(0.3)
-        VirtualInputManager:SendKeyEvent(true,Enum.KeyCode.E,false,game) task.wait(0.15)
-        VirtualInputManager:SendKeyEvent(false,Enum.KeyCode.E,false,game)
-        task.wait(2)
-        if toggleStates.AutoReEngage then
-            VirtualInputManager:SendKeyEvent(true,Enum.KeyCode.E,false,game) task.wait(0.15)
-            VirtualInputManager:SendKeyEvent(false,Enum.KeyCode.E,false,game) task.wait(0.3)
-            VirtualInputManager:SendKeyEvent(true,Enum.KeyCode.E,false,game) task.wait(0.15)
-            VirtualInputManager:SendKeyEvent(false,Enum.KeyCode.E,false,game)
+        while toggleStates.AutoReEngage do
+            sendDance()
+            task.wait(math.random(5,10))
         end
-        task.wait(2) reEngageState.cooldown=false
+        reEngageState.cooldown=false
     end)
 end
 local function onAutoReEngage(value)
@@ -695,25 +700,7 @@ local function onAutoReEngage(value)
     reEngageState.cooldown=false
     if not value then return end
     reEngageState.wasInBattle=false reEngageState.watchedTop=nil
-    local function hookTopHealth(top)
-        if reEngageState.topHealthConn then reEngageState.topHealthConn:Disconnect() reEngageState.topHealthConn=nil end
-        reEngageState.watchedTop=top if not top then return end
-        reEngageState.topHealthConn=top.AttributeChanged:Connect(function(attr)
-            if attr~="Health" then return end
-            local health=top:GetAttribute("Health")
-            if reEngageState.wasInBattle and (not health or health<=0) then
-                reEngageState.wasInBattle=false doReEngage()
-            elseif health and health>0 then reEngageState.wasInBattle=true end
-        end)
-    end
-    connections.autoReEngage=RunService.Heartbeat:Connect(function()
-        local top=getMyTop()
-        if top~=reEngageState.watchedTop then
-            hookTopHealth(top)
-            if not top and reEngageState.wasInBattle then reEngageState.wasInBattle=false doReEngage() end
-        end
-        if top then local health=top:GetAttribute("Health") if health and health>0 then reEngageState.wasInBattle=true end end
-    end)
+    doReEngage()
 end
 toggleCallbacks["AutoReEngage"]=onAutoReEngage
 
@@ -1561,6 +1548,40 @@ if startFlags.AutoTrashFarmBlatant then onAutoTrashBlatant(true) end
 
 Main1v1:AddToggle('AutoReEngage',{Text='Auto Re-Engage 1v1 Pad',Default=startFlags.AutoReEngage,Callback=onAutoReEngage})
 if startFlags.AutoReEngage then onAutoReEngage(true) end
+
+local recallState = { enabled=false, threshold=0.42, conn=nil, triggered=false }
+local function startRecallAtRPM()
+    if recallState.conn then recallState.conn:Disconnect() recallState.conn=nil end
+    recallState.triggered=false
+    recallState.conn=RunService.Heartbeat:Connect(function()
+        if not recallState.enabled then return end
+        local myTop=workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
+        if not myTop then recallState.triggered=false return end
+        if myTop:GetAttribute("IsStadiumFight")~=true then recallState.triggered=false return end
+        local health=myTop:GetAttribute("Health") or 0
+        local maxHealth=myTop:GetAttribute("MaxHealth") or 0
+        if maxHealth<=0 then return end
+        if health<=0 then recallState.triggered=false return end
+        local pct=health/maxHealth
+        if pct<=recallState.threshold and not recallState.triggered then
+            recallState.triggered=true
+            VirtualInputManager:SendKeyEvent(true,Enum.KeyCode.E,false,game) task.wait(0.05)
+            VirtualInputManager:SendKeyEvent(false,Enum.KeyCode.E,false,game)
+        elseif pct>recallState.threshold then
+            recallState.triggered=false
+        end
+    end)
+end
+Main1v1:AddToggle('RecallAtRPM',{Text='Recall At RPM %',Default=false,Callback=function(value)
+    recallState.enabled=value
+    if value then startRecallAtRPM()
+    else if recallState.conn then recallState.conn:Disconnect() recallState.conn=nil end recallState.triggered=false end
+end})
+Main1v1:AddSlider('RecallAtRPMThreshold',{Text='Recall Threshold',Min=0,Max=110,Default=100,Rounding=0,Suffix='%',Callback=function(value)
+    recallState.threshold=value/100
+    recallState.triggered=false
+end})
+
 Main1v1:AddButton('Tween To 1v1 Arena',function()
     local character=LocalPlayer.Character
     local hrp=character and character:FindFirstChild("HumanoidRootPart")
@@ -2299,7 +2320,7 @@ local function buildViewerGui(playerName, top)
     viewer.gui=sg
     local frame=Instance.new("Frame")
     frame.BackgroundColor3=Color3.fromRGB(10,10,20) frame.BackgroundTransparency=0.15
-    frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,460)
+    frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,440)
     frame.Position=UDim2.new(1,-295,0.5,-230) frame.Parent=sg
     Instance.new("UICorner",frame).CornerRadius=UDim.new(0,8)
     local dragging,dragStart,startPos=false,nil,nil
@@ -2383,6 +2404,13 @@ local function buildViewerGui(playerName, top)
             end)
         end
         return
+    end
+
+    -- Wait for attributes to replicate before building
+    local deadline=tick()+3
+    while _topAttr(top,"Spirit")=="?" and tick()<deadline do
+        task.wait(0.2)
+        if not top or not top.Parent then return end
     end
 
     -- Top is present, build stat rows
