@@ -737,11 +737,14 @@ local function onAutoPerfectLaunch(value)
     if not value then return end
     local passCount=0 local wasInZone=false
     local lastTrackerX=nil local barWasVisible=false
+    local fireAtX=nil local armed=false
     connections.perfect=RunService.Heartbeat:Connect(function()
         local now=tick() if now-clickState.last<clickState.COOLDOWN then return end
         local bar=getBar()
         if not bar then
-            if barWasVisible then passCount=0 wasInZone=false lastTrackerX=nil barWasVisible=false end
+            if barWasVisible then
+                passCount=0 wasInZone=false lastTrackerX=nil barWasVisible=false fireAtX=nil armed=false
+            end
             return
         end
         barWasVisible=true
@@ -749,13 +752,29 @@ local function onAutoPerfectLaunch(value)
         if not goal or not tracker then return end
         local tc=tracker.AbsolutePosition.X+tracker.AbsoluteSize.X/2
         local gc=goal.AbsolutePosition.X+goal.AbsoluteSize.X/2
-        local inZone=math.abs(tc-gc)<goal.AbsoluteSize.X/2*0.6
-        local movingLeft=lastTrackerX and (tc<lastTrackerX)
-        lastTrackerX=tc
-        if inZone and not wasInZone then passCount+=1 end
+        local halfZone=goal.AbsoluteSize.X/2
+        local inZone=math.abs(tc-gc)<halfZone
+        if inZone and not wasInZone then
+            passCount+=1
+            if passCount==1 then
+                local spread=halfZone*0.40
+                fireAtX=gc+(math.random()*2-1)*spread
+            elseif passCount==2 then
+                armed=true
+            end
+        end
+        if not inZone and wasInZone then
+            if passCount==1 then
+                local spread=halfZone*0.40
+                fireAtX=gc+(math.random()*2-1)*spread
+            end
+        end
         wasInZone=inZone
-        if inZone and passCount>=2 and movingLeft then
-            passCount=0 clickState.last=now doClick()
+        lastTrackerX=tc
+        if armed and inZone and fireAtX then
+            if math.abs(tc-fireAtX)<halfZone*0.5 then
+                passCount=0 fireAtX=nil armed=false clickState.last=now doClick()
+            end
         end
     end)
 end
