@@ -114,7 +114,7 @@ local goldTrashESP = { enabled=false, bbCache={}, promptConns={} }
 local dumpsterESP  = { enabled=false, cache={} }
 local topInspector = { enabled=false, conns={}, bbCache={}, buildLock={}, scale=1.0 }
 local acBypassGui  = nil
-local viewer       = { selectedPlayer=nil, liveConn=nil, gui=nil, autoEnabled=false, autoConn=nil, currentTop=nil }
+local viewer       = { selectedPlayer=nil, liveConn=nil, gui=nil, autoEnabled=false, autoConn=nil, currentTop=nil, ownRpmGui=nil, ownRpmConn=nil }
 
 local RPM_MULT   = 150
 local LIVE_STATES  = { Attacking=true, Guarding=true, Idle=true }
@@ -2825,6 +2825,126 @@ ESPViewer:AddToggle('AutoOpponentViewer',{Text='Auto Show Opponents Top',Default
         startAutoOpponentViewer()
         if not viewer.gui then buildViewerGui("Waiting for beyblade...",nil) end
     else stopAutoOpponentViewer() destroyViewerGui() end
+end})
+
+local function destroyOwnRpmGui()
+    if viewer.ownRpmConn then viewer.ownRpmConn:Disconnect() viewer.ownRpmConn=nil end
+    if viewer.ownRpmGui then pcall(function() viewer.ownRpmGui:Destroy() end) viewer.ownRpmGui=nil end
+    local old=playerGui:FindFirstChild("OwnRPMBarGui") if old then old:Destroy() end
+end
+
+local function buildOwnRpmGui()
+    destroyOwnRpmGui()
+    local sg=Instance.new("ScreenGui")
+    sg.Name="OwnRPMBarGui" sg.ResetOnSpawn=false sg.DisplayOrder=997 sg.Parent=playerGui
+    viewer.ownRpmGui=sg
+    local frame=Instance.new("Frame")
+    frame.BackgroundColor3=Color3.fromRGB(10,10,20) frame.BackgroundTransparency=0.15
+    frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,100)
+    frame.Position=UDim2.new(1,-295,0.5,220) frame.Parent=sg
+    Instance.new("UICorner",frame).CornerRadius=UDim.new(0,8)
+    -- drag
+    local dragging,dragStart,startPos=false,nil,nil
+    local dragHandle=Instance.new("TextButton")
+    dragHandle.BackgroundTransparency=1 dragHandle.Size=UDim2.new(1,0,1,0)
+    dragHandle.Position=UDim2.new(0,0,0,0) dragHandle.Text="" dragHandle.ZIndex=5 dragHandle.Parent=frame
+    dragHandle.InputBegan:Connect(function(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
+            dragging=true dragStart=input.Position startPos=frame.Position
+        end
+    end)
+    dragHandle.InputEnded:Connect(function(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then dragging=false end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch) then
+            local delta=input.Position-dragStart
+            frame.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+delta.X,startPos.Y.Scale,startPos.Y.Offset+delta.Y)
+        end
+    end)
+    -- title
+    local titleBg=Instance.new("Frame")
+    titleBg.BackgroundColor3=Color3.fromRGB(20,20,40) titleBg.BackgroundTransparency=0.2
+    titleBg.BorderSizePixel=0 titleBg.Size=UDim2.new(1,0,0,28) titleBg.Parent=frame
+    Instance.new("UICorner",titleBg).CornerRadius=UDim.new(0,8)
+    local titleLabel=Instance.new("TextLabel")
+    titleLabel.BackgroundTransparency=1 titleLabel.Size=UDim2.new(1,-10,1,0)
+    titleLabel.Position=UDim2.new(0,10,0,0) titleLabel.Font=Enum.Font.GothamBold
+    titleLabel.TextSize=13 titleLabel.TextColor3=Color3.fromRGB(220,220,255)
+    titleLabel.TextXAlignment=Enum.TextXAlignment.Left titleLabel.Text="⚙ My RPM" titleLabel.Parent=titleBg
+    -- content
+    local content=Instance.new("Frame")
+    content.BackgroundTransparency=1 content.Size=UDim2.new(1,-16,1,-34)
+    content.Position=UDim2.new(0,8,0,32) content.Parent=frame
+    -- rpm label row
+    local rpmValLabel=Instance.new("TextLabel")
+    rpmValLabel.BackgroundTransparency=1 rpmValLabel.Size=UDim2.new(0.5,0,0,18)
+    rpmValLabel.Position=UDim2.new(0,0,0,0) rpmValLabel.Font=Enum.Font.GothamBold
+    rpmValLabel.TextSize=11 rpmValLabel.TextColor3=Color3.fromRGB(0,200,255)
+    rpmValLabel.TextXAlignment=Enum.TextXAlignment.Left rpmValLabel.Text="..." rpmValLabel.Parent=content
+    local rpmPctLabel=Instance.new("TextLabel")
+    rpmPctLabel.BackgroundTransparency=1 rpmPctLabel.Size=UDim2.new(0.5,0,0,18)
+    rpmPctLabel.Position=UDim2.new(0.5,0,0,0) rpmPctLabel.Font=Enum.Font.GothamBold
+    rpmPctLabel.TextSize=14 rpmPctLabel.TextColor3=Color3.fromRGB(0,200,255)
+    rpmPctLabel.TextXAlignment=Enum.TextXAlignment.Right rpmPctLabel.Text="..." rpmPctLabel.Parent=content
+    -- bar bg
+    local rpmBarBG=Instance.new("Frame")
+    rpmBarBG.BackgroundColor3=Color3.fromRGB(30,30,40) rpmBarBG.BorderSizePixel=0
+    rpmBarBG.Size=UDim2.new(1,0,0,16) rpmBarBG.Position=UDim2.new(0,0,0,22) rpmBarBG.Parent=content
+    Instance.new("UICorner",rpmBarBG).CornerRadius=UDim.new(0,3)
+    local rpmBarFill=Instance.new("Frame")
+    rpmBarFill.BackgroundColor3=Color3.fromRGB(0,200,255) rpmBarFill.BorderSizePixel=0
+    rpmBarFill.Size=UDim2.new(0,0,1,0) rpmBarFill.Parent=rpmBarBG
+    Instance.new("UICorner",rpmBarFill).CornerRadius=UDim.new(0,3)
+    -- state label
+    local stateLabel=Instance.new("TextLabel")
+    stateLabel.BackgroundTransparency=1 stateLabel.Size=UDim2.new(1,0,0,18)
+    stateLabel.Position=UDim2.new(0,0,0,44) stateLabel.Font=Enum.Font.GothamBold
+    stateLabel.TextSize=12 stateLabel.TextColor3=Color3.fromRGB(200,200,200)
+    stateLabel.TextXAlignment=Enum.TextXAlignment.Center stateLabel.Text="State: Idle" stateLabel.Parent=content
+
+    local lastKnownRPM=0 local zeroFrames=0 local ZERO_THRESH=8 local updateInterval=0
+    viewer.ownRpmConn=RunService.Heartbeat:Connect(function(dt)
+        updateInterval+=dt if updateInterval<0.1 then return end updateInterval=0
+        local myTop=workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
+        if not myTop then
+            rpmBarFill.Size=UDim2.new(0,0,1,0) rpmBarFill.BackgroundColor3=Color3.fromRGB(100,100,100)
+            rpmValLabel.Text="No Top" rpmValLabel.TextColor3=Color3.fromRGB(150,150,150)
+            rpmPctLabel.Text="" stateLabel.Text="State: --" stateLabel.TextColor3=Color3.fromRGB(150,150,150)
+            lastKnownRPM=0 zeroFrames=0 return
+        end
+        local state=tostring(myTop:GetAttribute("State") or "")
+        local isSpinning=LIVE_STATES[state]==true
+        local health=myTop:GetAttribute("Health") or 0
+        local maxHealth=myTop:GetAttribute("MaxHealth") or 0
+        local currentRPM
+        if isSpinning then
+            local liveRPM=(maxHealth>0) and math.floor(health*20) or 0
+            if liveRPM>0 then lastKnownRPM=liveRPM zeroFrames=0 currentRPM=liveRPM
+            else zeroFrames+=1 currentRPM=zeroFrames>=ZERO_THRESH and 0 or lastKnownRPM end
+        else
+            if not health or health<=0 then lastKnownRPM=0 zeroFrames=0 currentRPM=0
+            else zeroFrames=0 currentRPM=lastKnownRPM end
+        end
+        local maxRPM=(maxHealth>0) and math.floor(maxHealth*20) or 1
+        local rawPct=currentRPM/math.max(maxRPM,1)
+        local pct=math.clamp(rawPct,0,1)
+        local barColor=getRPMBarColor(rawPct)
+        local pctInt=math.floor(rawPct*100)
+        local displayPct=rawPct>=1.0 and ("+"..math.min(pctInt,999).."%") or (pctInt.."%")
+        rpmValLabel.Text=currentRPM.." / "..maxRPM
+        rpmValLabel.TextColor3=isSpinning and barColor or Color3.fromRGB(150,150,150)
+        rpmPctLabel.Text=displayPct rpmPctLabel.TextColor3=isSpinning and barColor or Color3.fromRGB(150,150,150)
+        rpmBarFill.BackgroundColor3=isSpinning and barColor or Color3.fromRGB(100,100,100)
+        rpmBarFill.Size=UDim2.new(pct,0,1,0)
+        local displayState=state~="" and state or "Idle"
+        stateLabel.Text="State: "..displayState
+        stateLabel.TextColor3=STATE_COLORS[state] or Color3.fromRGB(200,200,200)
+    end)
+end
+
+ESPViewer:AddToggle('ShowOwnRPMBar',{Text='Show Own RPM Bar',Default=false,Callback=function(value)
+    if value then buildOwnRpmGui() else destroyOwnRpmGui() end
 end})
 
 -- ── MISC TAB ──────────────────────────────────────────────────────────────────
