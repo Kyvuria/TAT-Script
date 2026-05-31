@@ -1935,7 +1935,7 @@ local function buildTopBillboard(top)
     local bb=Instance.new("BillboardGui")
     bb.Name="TopInspectorBB" bb.AlwaysOnTop=true
     bb.Size=UDim2.new(0,math.floor(BASE_W*sc),0,math.floor(totalH*sc))
-    bb.StudsOffsetWorldSpace=Vector3.new(0,5,0) bb.MaxDistance=150
+    bb.StudsOffsetWorldSpace=Vector3.new(0,5,0) bb.MaxDistance=topInspector._maxDistance or 150
     bb.Adornee=attachPart bb.Parent=attachPart
     local inspHL=Instance.new("Highlight")
     inspHL.Name="TopInspectorHL" inspHL.FillColor=Color3.fromRGB(0,150,255)
@@ -2081,6 +2081,13 @@ local function onTopInspector(value)
     else teardownTopInspectorListeners() clearAllTopBillboards() end
 end
 ESPLeft:AddToggle('TopInspector',{Text='Top ESP',Default=false,Callback=onTopInspector})
+ESPLeft:AddSlider('TopESPMaxDistance',{Text='Max Distance',Min=0,Max=10000,Default=150,Rounding=0,Suffix=' studs',Callback=function(value)
+    topInspector.scale = topInspector.scale -- no-op to keep reference
+    for _, entry in pairs(topInspector.bbCache) do
+        pcall(function() entry.bb.MaxDistance = value end)
+    end
+    topInspector._maxDistance = value
+end})
 ESPLeft:AddToggle('HideOwnTop',{Text='Hide Own Top',Default=false,Callback=function(value)
     local myId=tostring(LocalPlayer.UserId)
     local myTop=workspace.Tops:FindFirstChild(myId)
@@ -2439,9 +2446,16 @@ local function buildViewerGui(playerName, top)
         passionBarFills[moveNum]={fill=barFill,label=pLabel,cost=cost}
     end
 
-    local move1=_topAttr(top,"SignatureMove_1")
-    local move2=_topAttr(top,"SignatureMove_2")
-    local move3=_topAttr(top,"SignatureMove_3")
+    local function resolveMoveName(top, attrName)
+        local uid = tonumber(top.Name)
+        local isNPC = uid and Players:GetPlayerByUserId(uid) == nil
+        local val = _topAttr(top, attrName)
+        if val == "?" and isNPC then return "None" end
+        return val
+    end
+    local move1=resolveMoveName(top,"SignatureMove_1")
+    local move2=resolveMoveName(top,"SignatureMove_2")
+    local move3=resolveMoveName(top,"SignatureMove_3")
     makeRow("Move 1:",move1,Color3.fromRGB(160,160,180),Color3.fromRGB(100,200,255),y) y+=18
     makePassionBar(1,move1,y) y+=11
     makeRow("Move 2:",move2,Color3.fromRGB(160,160,180),Color3.fromRGB(100,200,255),y) y+=18
