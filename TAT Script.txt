@@ -2348,7 +2348,7 @@ local function buildViewerGui(playerName, top)
     viewer.gui=sg
     local frame=Instance.new("Frame")
     frame.BackgroundColor3=Color3.fromRGB(10,10,20) frame.BackgroundTransparency=0.15
-    frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,440)
+    frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,460)
     frame.Position=savedPos or UDim2.new(1,-295,0.5,-230) frame.Parent=sg
     Instance.new("UICorner",frame).CornerRadius=UDim.new(0,8)
     local dragging,dragStart,startPos=false,nil,nil
@@ -2394,7 +2394,7 @@ local function buildViewerGui(playerName, top)
     local function makeRow(labelText, valueText, labelColor, valueColor, yOffset)
         local row=Instance.new("Frame") row.BackgroundTransparency=1 row.Size=UDim2.new(1,0,0,20) row.Position=UDim2.new(0,0,0,yOffset) row.Parent=content
         local lbl=Instance.new("TextLabel") lbl.BackgroundTransparency=1 lbl.Size=UDim2.new(0.42,0,1,0) lbl.Font=Enum.Font.GothamBold lbl.TextSize=11 lbl.TextColor3=labelColor or Color3.fromRGB(160,160,180) lbl.TextXAlignment=Enum.TextXAlignment.Left lbl.TextStrokeTransparency=0.5 lbl.TextStrokeColor3=Color3.fromRGB(0,0,0) lbl.Text=labelText lbl.Parent=row
-        local val=Instance.new("TextLabel") val.BackgroundTransparency=1 val.Size=UDim2.new(0.58,0,1,0) val.Position=UDim2.new(0.42,0,0,0) val.Font=Enum.Font.GothamBold val.TextSize=11 val.TextColor3=valueColor or Color3.fromRGB(255,255,255) val.TextXAlignment=Enum.TextXAlignment.Left val.TextStrokeTransparency=0.5 val.TextStrokeColor3=Color3.fromRGB(0,0,0) val.Text=valueText or "?" val.Parent=row
+        local val=Instance.new("TextLabel") val.BackgroundTransparency=1 val.Size=UDim2.new(0.58,0,1,0) val.Position=UDim2.new(0.42,0,0,0) val.Font=Enum.Font.GothamBold val.TextSize=11 val.TextColor3=valueColor or Color3.fromRGB(255,255,255) val.TextXAlignment=Enum.TextXAlignment.Left val.TextStrokeTransparency=0.5 val.TextStrokeColor3=Color3.fromRGB(0,0,0) val.Text=valueText or "?" val.TextWrapped=true val.Parent=row
         return val
     end
     local function makeDivider(yOffset)
@@ -2435,11 +2435,16 @@ local function buildViewerGui(playerName, top)
     end
 
     -- Wait for attributes to replicate before building
-    local deadline=tick()+3
-    while _topAttr(top,"Spirit")=="?" and tick()<deadline do
+    local deadline = tick() + 5
+    repeat
         task.wait(0.2)
         if not top or not top.Parent then return end
-    end
+        local allReady = _topAttr(top, "Spirit") ~= "?"
+            and _partAttr(top, "Body")  ~= "?"
+            and _partAttr(top, "Belt")  ~= "?"
+            and _partAttr(top, "Crown") ~= "?"
+            and _partAttr(top, "Point") ~= "?"
+    until allReady or tick() > deadline
 
     -- Top is present, build stat rows
     local y=0
@@ -2473,16 +2478,18 @@ local function buildViewerGui(playerName, top)
         local isNPC = uid and Players:GetPlayerByUserId(uid) == nil
         local val = _topAttr(top, attrName)
         if val == "?" and isNPC then return "None" end
+        -- Fallback: insert spaces before capital letters
+        val = val:gsub("(%l)(%u)", "%1 %2"):gsub("(%u)(%u%l)", "%1 %2")
         return val
     end
     local move1=resolveMoveName(top,"SignatureMove_1")
     local move2=resolveMoveName(top,"SignatureMove_2")
     local move3=resolveMoveName(top,"SignatureMove_3")
-    makeRow("Move 1:",move1,Color3.fromRGB(160,160,180),Color3.fromRGB(100,200,255),y) y+=18
+    makeRow("Move 1:",move1,Color3.fromRGB(160,160,180),Color3.fromRGB(100,200,255),y) y+=24
     makePassionBar(1,move1,y) y+=11
-    makeRow("Move 2:",move2,Color3.fromRGB(160,160,180),Color3.fromRGB(100,200,255),y) y+=18
+    makeRow("Move 2:",move2,Color3.fromRGB(160,160,180),Color3.fromRGB(100,200,255),y) y+=24
     makePassionBar(2,move2,y) y+=11
-    makeRow("Move 3:",move3,Color3.fromRGB(160,160,180),Color3.fromRGB(100,200,255),y) y+=18
+    makeRow("Move 3:",move3,Color3.fromRGB(160,160,180),Color3.fromRGB(100,200,255),y) y+=24
     makePassionBar(3,move3,y) y+=14
     makeDivider(y) y+=4
 
@@ -2860,7 +2867,7 @@ local function buildOwnRpmGui()
     local frame=Instance.new("Frame")
     frame.BackgroundColor3=Color3.fromRGB(10,10,20) frame.BackgroundTransparency=0.15
     frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,100)
-    frame.Position=UDim2.new(1,-295,0.5,220) frame.Parent=sg
+    frame.Position=UDim2.new(1,-295,0.5,240) frame.Parent=sg
     Instance.new("UICorner",frame).CornerRadius=UDim.new(0,8)
     -- drag
     local dragging,dragStart,startPos=false,nil,nil
@@ -3149,7 +3156,7 @@ local function buildExtraStatsGui()
             airflowVal.Text = fmtNum(airflow)
             airflowVal.TextColor3 = Color3.fromRGB(100, 255, 100)
         else
-            airflowVal.Text = "N/A" airflowVal.TextColor3 = Color3.fromRGB(120, 120, 140)
+            airflowVal.Text = "0" airflowVal.TextColor3 = Color3.fromRGB(100, 255, 100)
         end
     end)
 end
@@ -3337,6 +3344,20 @@ end)
 local WebhookRight = Tabs.Misc:AddLeftGroupbox('Webhooks')
 
 local webhookState = { url = "", enabled = false, disconnectPinged = false }
+local WEBHOOK_FILE = "TAT_Webhook.json"
+local function loadWebhookState()
+    local ok, data = pcall(function() return readfile(WEBHOOK_FILE) end)
+    if not ok or not data or data == "" then return end
+    local ok2, parsed = pcall(function() return HttpService:JSONDecode(data) end)
+    if ok2 and type(parsed) == "table" then
+        webhookState.url = parsed.url or ""
+        webhookState.enabled = parsed.enabled or false
+    end
+end
+local function saveWebhookState()
+    pcall(function() writefile(WEBHOOK_FILE, HttpService:JSONEncode({url=webhookState.url, enabled=webhookState.enabled})) end)
+end
+loadWebhookState()
 
 local function tryRequest(url, payload)
     local opts = { Url=url, Method="POST", Headers={["Content-Type"]="application/json"}, Body=payload }
@@ -3388,7 +3409,7 @@ end)
 
 WebhookRight:AddToggle('WebhookEnabled', {
     Text     = 'Enable Disconnect Webhook',
-    Default  = false,
+    Default  = webhookState.enabled,
     Callback = function(value)
         webhookState.enabled = value
         if value then
@@ -3399,17 +3420,19 @@ WebhookRight:AddToggle('WebhookEnabled', {
             end
             webhookState.disconnectPinged = false
         end
+        saveWebhookState()
     end,
 })
 
 WebhookRight:AddInput('WebhookURL', {
     Text     = 'Webhook URL',
-    Default  = '',
+    Default  = webhookState.url,
     Numeric  = false,
     Finished = false,
     Callback = function(v)
         webhookState.url = v
         webhookState.disconnectPinged = false
+        saveWebhookState()
     end,
 })
 
@@ -3420,7 +3443,8 @@ local ok2,err2=pcall(function()
     SaveManager:SetIgnoreIndexes({'UIToggleKeybind','PreferredState',
         'AutoSwitch_Enable_Attack','AutoSwitch_Enable_Stamina','AutoSwitch_Enable_Defense','AutoSwitch_Enable_Balance',
         'AutoSwitch_Threshold_Attack','AutoSwitch_Threshold_Stamina','AutoSwitch_Threshold_Defense','AutoSwitch_Threshold_Balance',
-        'AutoSwitchBlacklist','AutoSwitchTargetState'
+        'AutoSwitchBlacklist','AutoSwitchTargetState',
+        'WebhookEnabled','WebhookURL'
     })
     SaveManager:BuildConfigSection(Tabs.Config)
 end)
