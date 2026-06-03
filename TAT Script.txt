@@ -2348,7 +2348,7 @@ local function buildViewerGui(playerName, top)
     viewer.gui=sg
     local frame=Instance.new("Frame")
     frame.BackgroundColor3=Color3.fromRGB(10,10,20) frame.BackgroundTransparency=0.15
-    frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,460)
+    frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,505)
     frame.Position=savedPos or UDim2.new(1,-295,0.5,-230) frame.Parent=sg
     Instance.new("UICorner",frame).CornerRadius=UDim.new(0,8)
     local dragging,dragStart,startPos=false,nil,nil
@@ -2470,7 +2470,19 @@ local function buildViewerGui(playerName, top)
         pLabel.Position=UDim2.new(0,0,0,yOffset) pLabel.Font=Enum.Font.GothamBold pLabel.TextSize=9
         pLabel.TextColor3=Color3.fromRGB(180,180,180) pLabel.TextXAlignment=Enum.TextXAlignment.Right
         pLabel.Text=(cost and cost>0) and ("0/"..cost) or "0/0" pLabel.Parent=content
-        passionBarFills[moveNum]={fill=barFill,label=pLabel,cost=cost}
+        local rpmReqLabel=Instance.new("TextLabel")
+        rpmReqLabel.Name="RPMReq_"..moveNum
+        rpmReqLabel.BackgroundTransparency=1
+        rpmReqLabel.Size=UDim2.new(1,0,0,11)
+        rpmReqLabel.Position=UDim2.new(0,0,0,yOffset+7)
+        rpmReqLabel.Font=Enum.Font.GothamBold
+        rpmReqLabel.TextSize=9
+        rpmReqLabel.TextColor3=Color3.fromRGB(255,60,60)
+        rpmReqLabel.TextXAlignment=Enum.TextXAlignment.Center
+        rpmReqLabel.Text=""
+        rpmReqLabel.Visible=false
+        rpmReqLabel.Parent=content
+        passionBarFills[moveNum]={fill=barFill,label=pLabel,cost=cost,rpmReq=rpmReqLabel}
     end
 
     local function resolveMoveName(top, attrName)
@@ -2486,11 +2498,11 @@ local function buildViewerGui(playerName, top)
     local move2=resolveMoveName(top,"SignatureMove_2")
     local move3=resolveMoveName(top,"SignatureMove_3")
     makeRow("Move 1:",move1,Color3.fromRGB(160,160,180),Color3.fromRGB(100,200,255),y) y+=24
-    makePassionBar(1,move1,y) y+=11
+    makePassionBar(1,move1,y) y+=15
     makeRow("Move 2:",move2,Color3.fromRGB(160,160,180),Color3.fromRGB(100,200,255),y) y+=24
-    makePassionBar(2,move2,y) y+=11
+    makePassionBar(2,move2,y) y+=15
     makeRow("Move 3:",move3,Color3.fromRGB(160,160,180),Color3.fromRGB(100,200,255),y) y+=24
-    makePassionBar(3,move3,y) y+=14
+    makePassionBar(3,move3,y) y+=18
     makeDivider(y) y+=4
 
     local rawType=top:GetAttribute("Type") or top:GetAttribute("Style") or "?"
@@ -2532,12 +2544,51 @@ makeDivider(y) y+=4
     local stateRow2=Instance.new("Frame") stateRow2.BackgroundTransparency=1 stateRow2.Size=UDim2.new(1,0,0,32) stateRow2.Position=UDim2.new(0,0,0,y) stateRow2.Parent=content
     local stateKeyLabel=Instance.new("TextLabel") stateKeyLabel.BackgroundTransparency=1 stateKeyLabel.Size=UDim2.new(0.42,0,1,0) stateKeyLabel.Font=Enum.Font.GothamBold stateKeyLabel.TextSize=11 stateKeyLabel.TextColor3=Color3.fromRGB(160,160,180) stateKeyLabel.TextXAlignment=Enum.TextXAlignment.Left stateKeyLabel.Text="State:" stateKeyLabel.Parent=stateRow2
     local stateValLabel=Instance.new("TextLabel") stateValLabel.BackgroundTransparency=1 stateValLabel.Size=UDim2.new(0.58,0,1,0) stateValLabel.Position=UDim2.new(0.42,0,0,0) stateValLabel.Font=Enum.Font.GothamBold stateValLabel.TextSize=11 stateValLabel.TextColor3=Color3.fromRGB(200,200,200) stateValLabel.TextXAlignment=Enum.TextXAlignment.Left stateValLabel.TextWrapped=true stateValLabel.Text="..." stateValLabel.Parent=stateRow2
+    y+=34
+    local divStatusViewer=Instance.new("Frame") divStatusViewer.BackgroundColor3=Color3.fromRGB(60,60,80) divStatusViewer.BackgroundTransparency=0.3 divStatusViewer.BorderSizePixel=0 divStatusViewer.Size=UDim2.new(1,0,0,1) divStatusViewer.Position=UDim2.new(0,0,0,y) divStatusViewer.Parent=content y+=5
+    local matchStatusRow=Instance.new("Frame") matchStatusRow.BackgroundTransparency=1 matchStatusRow.Size=UDim2.new(1,0,0,32) matchStatusRow.Position=UDim2.new(0,0,0,y) matchStatusRow.Parent=content
+    local matchStatusKey=Instance.new("TextLabel") matchStatusKey.BackgroundTransparency=1 matchStatusKey.Size=UDim2.new(0.42,0,1,0) matchStatusKey.Font=Enum.Font.GothamBold matchStatusKey.TextSize=11 matchStatusKey.TextColor3=Color3.fromRGB(160,160,180) matchStatusKey.TextXAlignment=Enum.TextXAlignment.Left matchStatusKey.Text="Status:" matchStatusKey.Parent=matchStatusRow
+    local matchStatusLabel=Instance.new("TextLabel") matchStatusLabel.Name="MatchStatus" matchStatusLabel.BackgroundTransparency=1 matchStatusLabel.Size=UDim2.new(0.58,0,1,0) matchStatusLabel.Position=UDim2.new(0.42,0,0,0) matchStatusLabel.Font=Enum.Font.GothamBold matchStatusLabel.TextSize=11 matchStatusLabel.TextColor3=Color3.fromRGB(200,200,200) matchStatusLabel.TextXAlignment=Enum.TextXAlignment.Left matchStatusLabel.Text="Waiting..." matchStatusLabel.Parent=matchStatusRow
 
     local lastKnownRPM2=0 local zeroFrames2=0 local ZERO_THRESH2=8 local updateInterval=0
     local recalledTime=nil local RECALLED_WAIT=10
+    if viewer._fightEndHandled ~= true then
+        viewer._drainMine={} viewer._drainOpp={} viewer._lastSampleTime=0
+        viewer._fightEndHandled=nil
+    end
+    local SAMPLE_INTERVAL=0.5
+    local EVEN_THRESHOLD=3
     viewer.liveConn=RunService.Heartbeat:Connect(function(dt)
-        updateInterval+=dt if updateInterval<0.12 then return end updateInterval=0
+        updateInterval+=dt if updateInterval<0.05 then return end updateInterval=0
         if not top or not top.Parent then
+            -- fire Won/Lost exactly once before doing anything else
+            if viewer._fightEndHandled==false then
+                viewer._fightEndHandled=true
+                local endText,endColor
+                if viewer._myMatchStatus=="Winning" then
+                    endText="Won!" endColor=Color3.fromRGB(100,255,100)
+                elseif viewer._myMatchStatus=="Losing" then
+                    endText="Lost!" endColor=Color3.fromRGB(255,60,60)
+                end
+                if endText then
+                    viewer._myMatchStatus=endText viewer._myMatchStatusColor=endColor
+                    if matchStatusLabel and matchStatusLabel.Parent then
+                        matchStatusLabel.Text=endText matchStatusLabel.TextColor3=endColor
+                    end
+                    if matchStatusKey and matchStatusKey.Parent then
+                        matchStatusKey.TextColor3=endColor
+                    end
+                    task.delay(3,function()
+                        viewer._myMatchStatus=nil viewer._myMatchStatusColor=nil
+                        viewer._fightEndHandled=nil
+                        viewer._drainMine={} viewer._drainOpp={} viewer._lastSampleTime=0
+                    end)
+                else
+                    viewer._myMatchStatus=nil viewer._myMatchStatusColor=nil
+                    viewer._fightEndHandled=nil
+                    viewer._drainMine={} viewer._drainOpp={} viewer._lastSampleTime=0
+                end
+            end
             if not recalledTime then
                 recalledTime=tick() rpmBarFill.Size=UDim2.new(0,0,1,0) rpmBarFill.BackgroundColor3=Color3.fromRGB(100,100,100)
             end
@@ -2545,7 +2596,9 @@ makeDivider(y) y+=4
             if viewer.autoEnabled then
                 recalledTime=nil
                 if viewer.liveConn then viewer.liveConn:Disconnect() viewer.liveConn=nil end
-                task.spawn(function() buildViewerGui("Waiting for beyblade...",nil) end)
+                task.delay(viewer._fightEndHandled==true and 3 or 0, function()
+                    buildViewerGui("Waiting for beyblade...",nil)
+                end)
             elseif left>0 then
                 stateValLabel.Text="Recalled ("..left.."s)" stateValLabel.TextColor3=Color3.fromRGB(200,180,0)
                 rpmValLabel.Text="0 / 0" rpmValLabel.TextColor3=Color3.fromRGB(150,150,150)
@@ -2553,11 +2606,15 @@ makeDivider(y) y+=4
             else
                 recalledTime=nil
                 if viewer.liveConn then viewer.liveConn:Disconnect() viewer.liveConn=nil end
-                task.spawn(function() buildViewerGui("Waiting for beyblade...",nil) end)
+                task.delay(viewer._fightEndHandled==true and 3 or 0, function()
+                    buildViewerGui("Waiting for beyblade...",nil)
+                end)
             end
             return
         end
-        if recalledTime then recalledTime=nil end
+        if recalledTime then
+            recalledTime=nil
+        end
         local isStadium=(top:GetAttribute("IsStadiumFight")==true)
         local myTop=workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
         local myInStadium=myTop and myTop:GetAttribute("IsStadiumFight")==true
@@ -2586,6 +2643,91 @@ makeDivider(y) y+=4
         rpmBarFill.Size=UDim2.new(pct,0,1,0)
         local displayState=(state~="" and state or "Idle")
         stateValLabel.Text=displayState stateValLabel.TextColor3=STATE_COLORS[state] or Color3.fromRGB(200,200,200)
+        -- Match status calculation
+        do
+            local myId=tostring(LocalPlayer.UserId)
+            local myTop2=workspace.Tops:FindFirstChild(myId)
+            local now2=tick()
+            local statusText="Waiting..." local statusColor=Color3.fromRGB(200,200,200)
+            local myInFight = myTop2 and myTop2.Parent and myTop2:GetAttribute("IsStadiumFight")==true and (myTop2:GetAttribute("Health") or 0)>0
+            if myInFight and top and top.Parent and top.Name~=myId then
+                local myH=myTop2:GetAttribute("Health") or 0
+                local myMH=myTop2:GetAttribute("MaxHealth") or 1
+                local oppH=top:GetAttribute("Health") or 0
+                local oppMH=top:GetAttribute("MaxHealth") or 1
+                local myPct=myH/math.max(myMH,1)
+                local oppPct=oppH/math.max(oppMH,1)
+                if now2-viewer._lastSampleTime>=SAMPLE_INTERVAL then
+                    viewer._lastSampleTime=now2
+                    table.insert(viewer._drainMine,myPct)
+                    table.insert(viewer._drainOpp,oppPct)
+                    if #viewer._drainMine>6 then table.remove(viewer._drainMine,1) end
+                    if #viewer._drainOpp>6 then table.remove(viewer._drainOpp,1) end
+                end
+                if #viewer._drainMine>=2 then
+                    local myDrainRate=(viewer._drainMine[1]-viewer._drainMine[#viewer._drainMine])/((#viewer._drainMine-1)*SAMPLE_INTERVAL)
+                    local oppDrainRate=(viewer._drainOpp[1]-viewer._drainOpp[#viewer._drainOpp])/((#viewer._drainOpp-1)*SAMPLE_INTERVAL)
+                    local myDrain=math.max(myDrainRate,0.0001)
+                    local oppDrain=math.max(oppDrainRate,0.0001)
+                    local myTimeLeft=myPct/myDrain
+                    local oppTimeLeft=oppPct/oppDrain
+                    if math.abs(myTimeLeft-oppTimeLeft)<=EVEN_THRESHOLD then
+                        statusText="Even" statusColor=Color3.fromRGB(200,200,200)
+                        viewer._myMatchStatus="Even" viewer._myMatchStatusColor=Color3.fromRGB(200,200,200)
+                    elseif myTimeLeft>oppTimeLeft then
+                        statusText="Losing" statusColor=Color3.fromRGB(255,60,60)
+                        viewer._myMatchStatus="Winning" viewer._myMatchStatusColor=Color3.fromRGB(100,255,100)
+                    else
+                        statusText="Winning" statusColor=Color3.fromRGB(100,255,100)
+                        viewer._myMatchStatus="Losing" viewer._myMatchStatusColor=Color3.fromRGB(255,60,60)
+                    end
+                    viewer._fightEndHandled=false
+                else
+                    statusText="Waiting..."
+                end
+            else
+                local myId2=tostring(LocalPlayer.UserId)
+                local myTop3=workspace.Tops:FindFirstChild(myId2)
+                local myStillFighting = myTop3 and myTop3.Parent and myTop3:GetAttribute("IsStadiumFight")==true and (myTop3:GetAttribute("Health") or 0)>0
+                if myStillFighting then
+                    statusText="No Other Tops..." statusColor=Color3.fromRGB(160,160,180)
+                elseif viewer._fightEndHandled==false then
+                    -- fight just ended (recalled or match over) — fire result once
+                    viewer._fightEndHandled=true
+                    local endText,endColor
+                    if viewer._myMatchStatus=="Winning" then
+                        endText="Won!" endColor=Color3.fromRGB(100,255,100)
+                    elseif viewer._myMatchStatus=="Losing" then
+                        endText="Lost!" endColor=Color3.fromRGB(255,60,60)
+                    end
+                    if endText then
+                        viewer._myMatchStatus=endText viewer._myMatchStatusColor=endColor
+                        statusText=endText statusColor=endColor
+                        task.delay(3,function()
+                            viewer._myMatchStatus=nil viewer._myMatchStatusColor=nil
+                            viewer._fightEndHandled=nil
+                            viewer._drainMine={} viewer._drainOpp={} viewer._lastSampleTime=0
+                        end)
+                    else
+                        viewer._myMatchStatus=nil viewer._myMatchStatusColor=nil
+                        viewer._fightEndHandled=nil
+                        viewer._drainMine={} viewer._drainOpp={} viewer._lastSampleTime=0
+                        statusText="Waiting..."
+                    end
+                elseif viewer._fightEndHandled==true then
+                    statusText=viewer._myMatchStatus or "Waiting..."
+                    statusColor=viewer._myMatchStatusColor or Color3.fromRGB(200,200,200)
+                else
+                    statusText="Waiting..."
+                end
+            end
+            if matchStatusLabel and matchStatusLabel.Parent then
+                matchStatusLabel.Text=statusText matchStatusLabel.TextColor3=statusColor
+            end
+            if matchStatusKey and matchStatusKey.Parent then
+                matchStatusKey.TextColor3=Color3.fromRGB(160,160,180)
+            end
+        end
         for moveNum=1,3 do
             local bd=passionBarFills[moveNum]
             if bd and bd.fill and bd.fill.Parent then
@@ -2610,6 +2752,29 @@ makeDivider(y) y+=4
                         bd.fill.BackgroundColor3=fp>=1 and Color3.fromRGB(180,80,255) or Color3.fromRGB(100,200,255)
                         bd.label.Text=math.floor(passion).."/"..maxPassion
                     else bd.fill.Size=UDim2.new(0,0,1,0) bd.label.Text=math.floor(passion).."/?" end
+                end
+                if bd.rpmReq then
+                    local reqText=""
+                    local moveName=({move1,move2,move3})[moveNum]
+                    local isNone=(not moveName or moveName=="None" or moveName=="none" or moveName=="?")
+                    if not isNone then
+                        pcall(function()
+                            local movesFrame=playerGui.HUD["Top UI"].Moves["Move "..moveNum].Passion
+                            local lessHealth=movesFrame:FindFirstChild("LessHealth")
+                            local moreHealth=movesFrame:FindFirstChild("MoreHealth")
+                            if lessHealth and lessHealth.Visible then
+                                reqText="Requires lower RPM"
+                            elseif moreHealth and moreHealth.Visible then
+                                reqText="Requires higher RPM"
+                            end
+                        end)
+                    end
+                    if reqText~="" then
+                        bd.rpmReq.Text=reqText
+                        bd.rpmReq.Visible=true
+                    else
+                        bd.rpmReq.Visible=false
+                    end
                 end
             end
         end
@@ -2866,8 +3031,8 @@ local function buildOwnRpmGui()
     viewer.ownRpmGui=sg
     local frame=Instance.new("Frame")
     frame.BackgroundColor3=Color3.fromRGB(10,10,20) frame.BackgroundTransparency=0.15
-    frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,100)
-    frame.Position=UDim2.new(1,-295,0.5,240) frame.Parent=sg
+    frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,130)
+    frame.Position=UDim2.new(1,-295,0.5,285) frame.Parent=sg
     Instance.new("UICorner",frame).CornerRadius=UDim.new(0,8)
     -- drag
     local dragging,dragStart,startPos=false,nil,nil
@@ -2928,6 +3093,8 @@ local function buildOwnRpmGui()
     stateLabel.Position=UDim2.new(0,0,0,44) stateLabel.Font=Enum.Font.GothamBold
     stateLabel.TextSize=12 stateLabel.TextColor3=Color3.fromRGB(200,200,200)
     stateLabel.TextXAlignment=Enum.TextXAlignment.Center stateLabel.Text="State: Idle" stateLabel.Parent=content
+    local ownDivider=Instance.new("Frame") ownDivider.BackgroundColor3=Color3.fromRGB(60,60,80) ownDivider.BackgroundTransparency=0.3 ownDivider.BorderSizePixel=0 ownDivider.Size=UDim2.new(1,0,0,1) ownDivider.Position=UDim2.new(0,0,0,68) ownDivider.Parent=content
+    local ownStatusLabel=Instance.new("TextLabel") ownStatusLabel.BackgroundTransparency=1 ownStatusLabel.Size=UDim2.new(1,0,0,18) ownStatusLabel.Position=UDim2.new(0,0,0,72) ownStatusLabel.Font=Enum.Font.GothamBold ownStatusLabel.TextSize=12 ownStatusLabel.TextColor3=Color3.fromRGB(160,160,180) ownStatusLabel.TextXAlignment=Enum.TextXAlignment.Center ownStatusLabel.Text="Status: Waiting..." ownStatusLabel.Parent=content
 
     local lastKnownRPM=0 local zeroFrames=0 local ZERO_THRESH=8 local updateInterval=0
     viewer.ownRpmConn=RunService.Heartbeat:Connect(function(dt)
@@ -2937,7 +3104,17 @@ local function buildOwnRpmGui()
             rpmBarFill.Size=UDim2.new(0,0,1,0) rpmBarFill.BackgroundColor3=Color3.fromRGB(100,100,100)
             rpmValLabel.Text="No Top" rpmValLabel.TextColor3=Color3.fromRGB(150,150,150)
             rpmPctLabel.Text="" stateLabel.Text="State: --" stateLabel.TextColor3=Color3.fromRGB(150,150,150)
-            lastKnownRPM=0 zeroFrames=0 return
+            lastKnownRPM=0 zeroFrames=0
+            -- Clear match status when top is gone
+            if viewer._myMatchStatus and viewer._myMatchStatus ~= "Won!" and viewer._myMatchStatus ~= "Lost!" then
+                viewer._myMatchStatus = nil
+                viewer._myMatchStatusColor = nil
+            end
+            if ownStatusLabel and ownStatusLabel.Parent then
+                ownStatusLabel.Text = "Status: " .. (viewer._myMatchStatus or "Waiting...")
+                ownStatusLabel.TextColor3 = viewer._myMatchStatusColor or Color3.fromRGB(200,200,200)
+            end
+            return
         end
         local state=tostring(myTop:GetAttribute("State") or "")
         local isSpinning=LIVE_STATES[state]==true
@@ -2966,6 +3143,18 @@ local function buildOwnRpmGui()
         local displayState=state~="" and state or "Idle"
         stateLabel.Text="State: "..displayState
         stateLabel.TextColor3=STATE_COLORS[state] or Color3.fromRGB(200,200,200)
+        local ownStatusText=viewer._myMatchStatus or "Waiting..."
+        local ownStatusColor=viewer._myMatchStatusColor or Color3.fromRGB(200,200,200)
+        if ownStatusLabel and ownStatusLabel.Parent then
+            local myTopCheck=workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
+            if not myTopCheck then
+                ownStatusLabel.Text="Status: Waiting..."
+                ownStatusLabel.TextColor3=Color3.fromRGB(200,200,200)
+            else
+                ownStatusLabel.Text="Status: "..(ownStatusText or "Waiting...")
+                ownStatusLabel.TextColor3=ownStatusColor
+            end
+        end
     end)
 end
 
@@ -3172,6 +3361,15 @@ end})
 -- ── MISC TAB ──────────────────────────────────────────────────────────────────
 local MiscLeft  = Tabs.Misc:AddLeftGroupbox('Character')
 local MiscRight = Tabs.Misc:AddRightGroupbox('Server')
+
+MiscLeft:AddButton('Debug Match Status',function()
+    print("_myMatchStatus:", tostring(viewer._myMatchStatus))
+    print("_myMatchStatusColor:", tostring(viewer._myMatchStatusColor))
+    print("_fightEndHandled:", tostring(viewer._fightEndHandled))
+    print("currentTop:", tostring(viewer.currentTop))
+    local myTop = workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
+    print("myTop:", tostring(myTop))
+end)
 
 MiscLeft:AddButton('Debug My Top',function()
     local top=getMyTop()
