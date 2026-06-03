@@ -63,8 +63,6 @@ local Tabs = {
     Misc=Window:AddTab('Misc'), Config=Window:AddTab('Config'),
 }
 
-local function Notify() end -- disabled; re-enable if needed
-
 local Players             = game:GetService("Players")
 local RunService          = game:GetService("RunService")
 local UserInputService    = game:GetService("UserInputService")
@@ -91,7 +89,6 @@ local toggleCallbacks = {}
 local farmState = {
     isManualRun=false, manualCancelled=false, lastPos=nil, stuckCount=0,
     trashRunning=false, blatantRunning=false, trashBlacklist={},
-    isBurgerBuying=false,
 }
 local moveState = {
     SAFE_SPEED=140, lastGroundTouch=0, GROUND_TOUCH_INTERVAL=6,
@@ -1095,7 +1092,7 @@ for _, typeName in ipairs(TYPE_LIST) do
     end})
 end
 
--- ── RPM % Presets (gap + reordered: dropdown → Preset Name → Save → Delete) ──
+-- ── RPM % Presets ──────────────────────────────────────────────────────────────
 MainLeft:AddLabel(' ')
 local switchStatePresets = {}
 local SWITCH_STATE_PRESET_FILE = "TAT_SwitchStatePresets.json"
@@ -1446,7 +1443,7 @@ for _, typeName in ipairs(TYPE_LIST_STYLE) do
 end
 MainLeft:AddButton('Clear Opponent History',function() opponentHistory={} saveOpponentHistory() end)
 
--- ── Style Presets (gap + reordered: dropdown → Preset Name → Save → Delete) ──
+-- ── Style Presets ─────────────────────────────────────────────────────────────
 MainLeft:AddLabel(' ')
 local stylePresets = {}
 local STYLE_PRESET_FILE = "TAT_StylePresets.json"
@@ -1896,14 +1893,6 @@ local function getOwnerName(top)
     if uid then local p=Players:GetPlayerByUserId(uid) if p then return p.Name end return "ID:"..top.Name end
     return top.Name
 end
-local function getPartName(top, partName)
-    local part=top:FindFirstChild(partName) if not part then return "?" end
-    local n=part:GetAttribute("Name")
-    if n and tostring(n)~="" then return tostring(n) end
-    local iname=part.Name
-    if iname and iname~=partName and iname~="" then return iname end
-    return "?"
-end
 local function getRPMBarColor(pct)
     if pct>=1.0 then return Color3.fromRGB(180,80,255)
     elseif pct>=0.50 then return Color3.fromRGB(0,200,255)
@@ -2098,7 +2087,6 @@ local function onTopInspector(value)
 end
 ESPLeft:AddToggle('TopInspector',{Text='Top ESP',Default=false,Callback=onTopInspector})
 ESPLeft:AddSlider('TopESPMaxDistance',{Text='Max Distance',Min=0,Max=10000,Default=150,Rounding=0,Suffix=' studs',Callback=function(value)
-    topInspector.scale = topInspector.scale -- no-op to keep reference
     for _, entry in pairs(topInspector.bbCache) do
         pcall(function() entry.bb.MaxDistance = value end)
     end
@@ -2490,7 +2478,6 @@ local function buildViewerGui(playerName, top)
         local isNPC = uid and Players:GetPlayerByUserId(uid) == nil
         local val = _topAttr(top, attrName)
         if val == "?" and isNPC then return "None" end
-        -- Fallback: insert spaces before capital letters
         val = val:gsub("(%l)(%u)", "%1 %2"):gsub("(%u)(%u%l)", "%1 %2")
         return val
     end
@@ -2518,18 +2505,18 @@ local function buildViewerGui(playerName, top)
     makeRow("DEF:",_topAttr(top,"Defense"),Color3.fromRGB(160,160,180),Color3.fromRGB(80,220,80),y) y+=20
     makeRow("STA:",_topAttr(top,"Stamina"),Color3.fromRGB(160,160,180),Color3.fromRGB(255,200,0),y) y+=20
 
-local rawStyleType = top:GetAttribute("LaunchType") or top:GetAttribute("Type") or top:GetAttribute("Style") or "?"
-local styleTypeStr = tostring(rawStyleType)
-local typeMap2 = {Attack="Rush", Stamina="Focused", Defense="Bunker", Balance="Wobble", Standard="Standard"}
-local styleDisplay = typeMap2[styleTypeStr] or styleTypeStr
-local styleColor
-if styleDisplay:lower():find("rush") then styleColor=Color3.fromRGB(255,60,60)
-elseif styleDisplay:lower():find("focus") then styleColor=Color3.fromRGB(255,200,0)
-elseif styleDisplay:lower():find("bunker") then styleColor=Color3.fromRGB(80,200,80)
-elseif styleDisplay:lower():find("wobble") then styleColor=Color3.fromRGB(180,80,255)
-else styleColor=Color3.fromRGB(200,200,200) end
-makeRow("Style:",styleDisplay,Color3.fromRGB(160,160,180),styleColor,y) y+=22
-makeDivider(y) y+=4
+    local rawStyleType = top:GetAttribute("LaunchType") or top:GetAttribute("Type") or top:GetAttribute("Style") or "?"
+    local styleTypeStr = tostring(rawStyleType)
+    local typeMap2 = {Attack="Rush", Stamina="Focused", Defense="Bunker", Balance="Wobble", Standard="Standard"}
+    local styleDisplay = typeMap2[styleTypeStr] or styleTypeStr
+    local styleColor
+    if styleDisplay:lower():find("rush") then styleColor=Color3.fromRGB(255,60,60)
+    elseif styleDisplay:lower():find("focus") then styleColor=Color3.fromRGB(255,200,0)
+    elseif styleDisplay:lower():find("bunker") then styleColor=Color3.fromRGB(80,200,80)
+    elseif styleDisplay:lower():find("wobble") then styleColor=Color3.fromRGB(180,80,255)
+    else styleColor=Color3.fromRGB(200,200,200) end
+    makeRow("Style:",styleDisplay,Color3.fromRGB(160,160,180),styleColor,y) y+=22
+    makeDivider(y) y+=4
 
     local rpmLabel=Instance.new("TextLabel") rpmLabel.BackgroundTransparency=1 rpmLabel.Size=UDim2.new(0.32,0,0,18) rpmLabel.Position=UDim2.new(0,0,0,y) rpmLabel.Font=Enum.Font.GothamBold rpmLabel.TextSize=11 rpmLabel.TextColor3=Color3.fromRGB(160,160,180) rpmLabel.TextXAlignment=Enum.TextXAlignment.Left rpmLabel.Text="RPM:" rpmLabel.Parent=content
     local rpmValLabel=Instance.new("TextLabel") rpmValLabel.BackgroundTransparency=1 rpmValLabel.Size=UDim2.new(0.38,0,0,18) rpmValLabel.Position=UDim2.new(0.32,0,0,y) rpmValLabel.Font=Enum.Font.GothamBold rpmValLabel.TextSize=11 rpmValLabel.TextColor3=Color3.fromRGB(0,200,255) rpmValLabel.TextXAlignment=Enum.TextXAlignment.Left rpmValLabel.Text="..." rpmValLabel.Parent=content
@@ -2561,7 +2548,6 @@ makeDivider(y) y+=4
     viewer.liveConn=RunService.Heartbeat:Connect(function(dt)
         updateInterval+=dt if updateInterval<0.05 then return end updateInterval=0
         if not top or not top.Parent then
-            -- fire Won/Lost exactly once before doing anything else
             if viewer._fightEndHandled==false then
                 viewer._fightEndHandled=true
                 local endText,endColor
@@ -2612,13 +2598,7 @@ makeDivider(y) y+=4
             end
             return
         end
-        if recalledTime then
-            recalledTime=nil
-        end
-        local isStadium=(top:GetAttribute("IsStadiumFight")==true)
-        local myTop=workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
-        local myInStadium=myTop and myTop:GetAttribute("IsStadiumFight")==true
-        -- always show stats even outside stadium
+        if recalledTime then recalledTime=nil end
         local state=tostring(top:GetAttribute("State") or "") local isSpinning=LIVE_STATES[state]==true
         local health=top:GetAttribute("Health") or 0 local maxHealth=top:GetAttribute("MaxHealth") or 0
         local currentRPM
@@ -2633,7 +2613,7 @@ makeDivider(y) y+=4
         local maxRPM=(maxHealth>0) and math.floor(maxHealth*20) or 1
         local rawPct=currentRPM/math.max(maxRPM,1)
         local pct=math.clamp(rawPct,0,1)
-        local barColor=getRPMBarColor(pct)
+        local barColor=getRPMBarColor(rawPct)
         local pctInt=math.floor(rawPct*100)
         local displayPct=rawPct>=1.0 and ("+"..math.min(pctInt,999).."%") or (pctInt.."%")
         rpmValLabel.Text=currentRPM.." / "..maxRPM
@@ -2692,7 +2672,6 @@ makeDivider(y) y+=4
                 if myStillFighting then
                     statusText="No Other Tops..." statusColor=Color3.fromRGB(160,160,180)
                 elseif viewer._fightEndHandled==false then
-                    -- fight just ended (recalled or match over) — fire result once
                     viewer._fightEndHandled=true
                     local endText,endColor
                     if viewer._myMatchStatus=="Winning" then
@@ -2769,12 +2748,8 @@ makeDivider(y) y+=4
                             end
                         end)
                     end
-                    if reqText~="" then
-                        bd.rpmReq.Text=reqText
-                        bd.rpmReq.Visible=true
-                    else
-                        bd.rpmReq.Visible=false
-                    end
+                    bd.rpmReq.Visible = reqText ~= ""
+                    if reqText ~= "" then bd.rpmReq.Text=reqText end
                 end
             end
         end
@@ -3034,7 +3009,6 @@ local function buildOwnRpmGui()
     frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,130)
     frame.Position=UDim2.new(1,-295,0.5,285) frame.Parent=sg
     Instance.new("UICorner",frame).CornerRadius=UDim.new(0,8)
-    -- drag
     local dragging,dragStart,startPos=false,nil,nil
     local dragHandle=Instance.new("TextButton")
     dragHandle.BackgroundTransparency=1 dragHandle.Size=UDim2.new(1,0,1,0)
@@ -3053,7 +3027,6 @@ local function buildOwnRpmGui()
             frame.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+delta.X,startPos.Y.Scale,startPos.Y.Offset+delta.Y)
         end
     end)
-    -- title
     local titleBg=Instance.new("Frame")
     titleBg.BackgroundColor3=Color3.fromRGB(20,20,40) titleBg.BackgroundTransparency=0.2
     titleBg.BorderSizePixel=0 titleBg.Size=UDim2.new(1,0,0,28) titleBg.Parent=frame
@@ -3063,11 +3036,9 @@ local function buildOwnRpmGui()
     titleLabel.Position=UDim2.new(0,10,0,0) titleLabel.Font=Enum.Font.GothamBold
     titleLabel.TextSize=13 titleLabel.TextColor3=Color3.fromRGB(220,220,255)
     titleLabel.TextXAlignment=Enum.TextXAlignment.Left titleLabel.Text="⚙ My RPM" titleLabel.Parent=titleBg
-    -- content
     local content=Instance.new("Frame")
     content.BackgroundTransparency=1 content.Size=UDim2.new(1,-16,1,-34)
     content.Position=UDim2.new(0,8,0,32) content.Parent=frame
-    -- rpm label row
     local rpmValLabel=Instance.new("TextLabel")
     rpmValLabel.BackgroundTransparency=1 rpmValLabel.Size=UDim2.new(0.5,0,0,18)
     rpmValLabel.Position=UDim2.new(0,0,0,0) rpmValLabel.Font=Enum.Font.GothamBold
@@ -3078,7 +3049,6 @@ local function buildOwnRpmGui()
     rpmPctLabel.Position=UDim2.new(0.5,0,0,0) rpmPctLabel.Font=Enum.Font.GothamBold
     rpmPctLabel.TextSize=14 rpmPctLabel.TextColor3=Color3.fromRGB(0,200,255)
     rpmPctLabel.TextXAlignment=Enum.TextXAlignment.Right rpmPctLabel.Text="..." rpmPctLabel.Parent=content
-    -- bar bg
     local rpmBarBG=Instance.new("Frame")
     rpmBarBG.BackgroundColor3=Color3.fromRGB(30,30,40) rpmBarBG.BorderSizePixel=0
     rpmBarBG.Size=UDim2.new(1,0,0,16) rpmBarBG.Position=UDim2.new(0,0,0,22) rpmBarBG.Parent=content
@@ -3087,14 +3057,13 @@ local function buildOwnRpmGui()
     rpmBarFill.BackgroundColor3=Color3.fromRGB(0,200,255) rpmBarFill.BorderSizePixel=0
     rpmBarFill.Size=UDim2.new(0,0,1,0) rpmBarFill.Parent=rpmBarBG
     Instance.new("UICorner",rpmBarFill).CornerRadius=UDim.new(0,3)
-    -- state label
     local stateLabel=Instance.new("TextLabel")
     stateLabel.BackgroundTransparency=1 stateLabel.Size=UDim2.new(1,0,0,18)
     stateLabel.Position=UDim2.new(0,0,0,44) stateLabel.Font=Enum.Font.GothamBold
     stateLabel.TextSize=12 stateLabel.TextColor3=Color3.fromRGB(200,200,200)
     stateLabel.TextXAlignment=Enum.TextXAlignment.Center stateLabel.Text="State: Idle" stateLabel.Parent=content
     local ownDivider=Instance.new("Frame") ownDivider.BackgroundColor3=Color3.fromRGB(60,60,80) ownDivider.BackgroundTransparency=0.3 ownDivider.BorderSizePixel=0 ownDivider.Size=UDim2.new(1,0,0,1) ownDivider.Position=UDim2.new(0,0,0,68) ownDivider.Parent=content
-    local ownStatusLabel=Instance.new("TextLabel") ownStatusLabel.BackgroundTransparency=1 ownStatusLabel.Size=UDim2.new(1,0,0,18) ownStatusLabel.Position=UDim2.new(0,0,0,72) ownStatusLabel.Font=Enum.Font.GothamBold ownStatusLabel.TextSize=12 ownStatusLabel.TextColor3=Color3.fromRGB(160,160,180) ownStatusLabel.TextXAlignment=Enum.TextXAlignment.Center ownStatusLabel.Text="Status: Waiting..." ownStatusLabel.Parent=content
+    local ownStatusLabel=Instance.new("TextLabel") ownStatusLabel.BackgroundTransparency=1 ownStatusLabel.Size=UDim2.new(1,0,0,18) ownStatusLabel.Position=UDim2.new(0,0,0,72) ownStatusLabel.Font=Enum.Font.GothamBold ownStatusLabel.TextSize=12 ownStatusLabel.TextColor3=Color3.fromRGB(150,150,150) ownStatusLabel.TextXAlignment=Enum.TextXAlignment.Center ownStatusLabel.Text="Status: Waiting..." ownStatusLabel.Parent=content
 
     local lastKnownRPM=0 local zeroFrames=0 local ZERO_THRESH=8 local updateInterval=0
     viewer.ownRpmConn=RunService.Heartbeat:Connect(function(dt)
@@ -3103,9 +3072,8 @@ local function buildOwnRpmGui()
         if not myTop then
             rpmBarFill.Size=UDim2.new(0,0,1,0) rpmBarFill.BackgroundColor3=Color3.fromRGB(100,100,100)
             rpmValLabel.Text="No Top" rpmValLabel.TextColor3=Color3.fromRGB(150,150,150)
-            rpmPctLabel.Text="" stateLabel.Text="State: --" stateLabel.TextColor3=Color3.fromRGB(150,150,150)
+            rpmPctLabel.Text="" stateLabel.Text="State: Waiting..." stateLabel.TextColor3=Color3.fromRGB(150,150,150)
             lastKnownRPM=0 zeroFrames=0
-            -- Clear match status when top is gone
             if viewer._myMatchStatus and viewer._myMatchStatus ~= "Won!" and viewer._myMatchStatus ~= "Lost!" then
                 viewer._myMatchStatus = nil
                 viewer._myMatchStatusColor = nil
@@ -3177,11 +3145,9 @@ local function buildExtraStatsGui()
     local frame = Instance.new("Frame")
     frame.BackgroundColor3 = Color3.fromRGB(10, 10, 20) frame.BackgroundTransparency = 0.15
     frame.BorderSizePixel = 0 frame.Size = UDim2.new(0, 160, 0, 110)
-    -- Position it to the LEFT of the main viewer (which is at X offset -295 from right edge)
     frame.Position = UDim2.new(1, -465, 0.5, -230) frame.Parent = sg
     Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
 
-    -- Drag support
     local dragging, dragStart, startPos = false, nil, nil
     local dragHandle = Instance.new("TextButton")
     dragHandle.BackgroundTransparency = 1 dragHandle.Size = UDim2.new(1, 0, 1, 0)
@@ -3201,7 +3167,6 @@ local function buildExtraStatsGui()
         end
     end)
 
-    -- Title bar
     local titleBg = Instance.new("Frame")
     titleBg.BackgroundColor3 = Color3.fromRGB(20, 20, 40) titleBg.BackgroundTransparency = 0.2
     titleBg.BorderSizePixel = 0 titleBg.Size = UDim2.new(1, 0, 0, 28) titleBg.Parent = frame
@@ -3212,7 +3177,6 @@ local function buildExtraStatsGui()
     titleLabel.TextSize = 12 titleLabel.TextColor3 = Color3.fromRGB(220, 220, 255)
     titleLabel.TextXAlignment = Enum.TextXAlignment.Left titleLabel.Text = "📊 Extra Stats" titleLabel.Parent = titleBg
 
-    -- Content frame
     local content = Instance.new("Frame")
     content.BackgroundTransparency = 1 content.Size = UDim2.new(1, -12, 1, -34)
     content.Position = UDim2.new(0, 6, 0, 32) content.Parent = frame
@@ -3221,7 +3185,6 @@ local function buildExtraStatsGui()
         local row = Instance.new("Frame")
         row.BackgroundTransparency = 1 row.Size = UDim2.new(1, 0, 0, 18)
         row.Position = UDim2.new(0, 0, 0, yOffset) row.Parent = content
-
         local lbl = Instance.new("TextLabel")
         lbl.BackgroundTransparency = 1 lbl.Size = UDim2.new(1, 0, 0, 13)
         lbl.Position = UDim2.new(0, 0, 0, 0)
@@ -3229,7 +3192,6 @@ local function buildExtraStatsGui()
         lbl.TextColor3 = Color3.fromRGB(140, 140, 170)
         lbl.TextXAlignment = Enum.TextXAlignment.Left
         lbl.Text = icon .. " " .. labelText lbl.Parent = row
-
         local val = Instance.new("TextLabel")
         val.BackgroundTransparency = 1 val.Size = UDim2.new(1, 0, 0, 16)
         val.Position = UDim2.new(0, 0, 0, 12)
@@ -3240,7 +3202,6 @@ local function buildExtraStatsGui()
         return val
     end
 
-    -- Divider helper
     local function makeDivider(yOffset)
         local div = Instance.new("Frame")
         div.BackgroundColor3 = Color3.fromRGB(60, 60, 80) div.BackgroundTransparency = 0.3
@@ -3252,7 +3213,6 @@ local function buildExtraStatsGui()
     makeDivider(36)
     local airflowVal = makeStatRow("🌀", "Airflow", 40)
 
-    -- Live update loop watching viewer.currentTop
     local lastTop = nil
     local updateInterval = 0
     extraStatsConn = RunService.Heartbeat:Connect(function(dt)
@@ -3269,13 +3229,11 @@ local function buildExtraStatsGui()
             lastTop = nil return
         end
 
-        -- Speed: check several attribute name variants the game might use
         local function readAttr(inst, ...)
             for _, name in ipairs({...}) do
                 local v = inst:GetAttribute(name)
                 if v ~= nil then return v end
             end
-            -- also check children StringValues / NumberValues
             for _, name in ipairs({...}) do
                 local child = inst:FindFirstChild(name)
                 if child and (child:IsA("NumberValue") or child:IsA("StringValue") or child:IsA("IntValue")) then
@@ -3290,7 +3248,6 @@ local function buildExtraStatsGui()
             "BeltAirflow", "PointAirflow", "BaseAirflow", "TotalAirflow", "AirFlow_Total",
             "Airflow_Base", "AF", "Af", "af")
 
-        -- Fallback: broad attribute scan — print ALL attrs to console on first new top for debugging
         if not speed or not airflow then
             for attrName, attrVal in pairs(top:GetAttributes()) do
                 local lower = attrName:lower()
@@ -3304,7 +3261,6 @@ local function buildExtraStatsGui()
             end
         end
 
-        -- Also check Belt and Point children since airflow is often a part stat
         if not airflow then
             for _, childName in ipairs({"Belt", "Point", "Body", "Crown"}) do
                 local child = top:FindFirstChild(childName)
@@ -3321,17 +3277,13 @@ local function buildExtraStatsGui()
             end
         end
 
-        -- Helper: format a number nicely (round to 2dp, strip trailing zeros)
         local function fmtNum(v)
             local n = tonumber(v)
             if not n then return tostring(v) end
-            -- If it's a whole number just show it as an integer
             if n == math.floor(n) then return tostring(math.floor(n)) end
-            -- Otherwise round to 2 decimal places
             return string.format("%.2f", n):gsub("%.?0+$", "")
         end
 
-        -- Display Speed (always whole number, always white)
         if speed ~= nil then
             local num = tonumber(speed)
             speedVal.Text = num and tostring(math.floor(num + 0.5)) or tostring(speed)
@@ -3340,7 +3292,6 @@ local function buildExtraStatsGui()
             speedVal.Text = "N/A" speedVal.TextColor3 = Color3.fromRGB(120, 120, 140)
         end
 
-        -- Display Airflow (always green)
         if airflow ~= nil then
             airflowVal.Text = fmtNum(airflow)
             airflowVal.TextColor3 = Color3.fromRGB(100, 255, 100)
@@ -3409,13 +3360,13 @@ local function onAntiAFK(value)
     toggleStates.AntiAFK=value
     if value then
         local lastAFKPress=tick()
-connections.antiAFK=RunService.Heartbeat:Connect(function()
-    if tick()-lastAFKPress>=55 then
-        lastAFKPress=tick()
-        VirtualInputManager:SendKeyEvent(true,Enum.KeyCode.F13,false,game) task.wait(0.05)
-        VirtualInputManager:SendKeyEvent(false,Enum.KeyCode.F13,false,game)
-    end
-end)
+        connections.antiAFK=RunService.Heartbeat:Connect(function()
+            if tick()-lastAFKPress>=55 then
+                lastAFKPress=tick()
+                VirtualInputManager:SendKeyEvent(true,Enum.KeyCode.F13,false,game) task.wait(0.05)
+                VirtualInputManager:SendKeyEvent(false,Enum.KeyCode.F13,false,game)
+            end
+        end)
         pcall(function()
             connections.idled=LocalPlayer.Idled:Connect(function()
                 VirtualInputManager:SendKeyEvent(true,Enum.KeyCode.F13,false,game) task.wait(0.05)
