@@ -111,7 +111,8 @@ local goldTrashESP = { enabled=false, bbCache={}, promptConns={} }
 local dumpsterESP  = { enabled=false, cache={} }
 local topInspector = { enabled=false, conns={}, bbCache={}, buildLock={}, scale=1.0 }
 local acBypassGui  = nil
-local viewer       = { selectedPlayer=nil, liveConn=nil, gui=nil, autoEnabled=false, autoConn=nil, currentTop=nil, ownRpmGui=nil, ownRpmConn=nil }
+local viewer = { selectedPlayer=nil, liveConn=nil, gui=nil, autoEnabled=false, autoConn=nil, currentTop=nil, ownRpmGui=nil, ownRpmConn=nil }
+local previousTopSnapshots = {} -- stores {playerName -> snapshot table}
 
 local RPM_MULT   = 150
 local LIVE_STATES  = { Attacking=true, Guarding=true, Idle=true }
@@ -1541,6 +1542,116 @@ local function onAutoTrashLegit(value)
     else stopAutoSprint() end
 end
 toggleCallbacks["AutoTrashFarm"]=onAutoTrashLegit
+do
+local autoTweenMeteor = {
+    enabled = false,
+    running = false,
+    conn = nil,
+    processedMetors = {},
+}
+
+local function getMeteorPrompt(meteor)
+    local prompt = meteor:FindFirstChildWhichIsA("ProximityPrompt", true)
+    return prompt
+end
+
+local function isMeteorLanded(meteor)
+    local prompt = getMeteorPrompt(meteor)
+    return prompt ~= nil and prompt.Enabled
+end
+
+local function getClosestLandedMeteor()
+    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+    local best, bestDist, bestPrompt = nil, math.huge, nil
+    for _, meteor in ipairs(workspace.Map.Meteors:GetChildren()) do
+        if not (meteor:IsA("Model") or meteor:IsA("Part") or meteor:IsA("BasePart")) then continue end
+        if autoTweenMeteor.processedMetors[meteor] then continue end
+        local prompt = getMeteorPrompt(meteor)
+        if not prompt or not prompt.Enabled then continue end
+        local core = meteor:FindFirstChild("Core")
+        local pos = core and core.Position or (pcall(function() return meteor:GetPivot().Position end) and meteor:GetPivot().Position)
+        if not pos then continue end
+        local d = (hrp.Position - pos).Magnitude
+        if d < bestDist then
+            best = meteor bestDist = d bestPrompt = prompt
+        end
+    end
+    return best, bestPrompt
+end
+
+local function tweenToMeteorAndPickup(meteor, prompt)
+    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    autoTweenMeteor.processedMetors[meteor] = true
+    local core = meteor:FindFirstChild("Core")
+    local targetPos = core and core.Position or meteor:GetPivot().Position
+    local dist = (hrp.Position - targetPos).Magnitude
+    local duration = math.max(dist / 80, 0.05)
+    local tween = TweenService:Create(
+        hrp,
+        TweenInfo.new(duration, Enum.EasingStyle.Linear),
+        { CFrame = CFrame.new(targetPos) }
+    )
+    tween:Play()
+    tween.Completed:Wait()
+    if not autoTweenMeteor.enabled then return end
+    task.wait(0.2)
+    if not prompt or not prompt.Parent or not prompt.Enabled then return end
+    for attempt = 1, 3 do
+        if not autoTweenMeteor.enabled then return end
+        if not meteor.Parent or not prompt or not prompt.Parent or not prompt.Enabled then break end
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+        local holdStart = tick()
+        while tick() - holdStart < 3 do
+            task.wait(0.1)
+            if not autoTweenMeteor.enabled then
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+                return
+            end
+            if not meteor.Parent or not prompt.Parent or not prompt.Enabled then
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+                return
+            end
+        end
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+        task.wait(0.2)
+    end
+end
+
+local function runAutoTweenMeteorLoop()
+    autoTweenMeteor.running = true
+    while autoTweenMeteor.enabled do
+        local meteor, prompt = getClosestLandedMeteor()
+        if meteor and prompt then
+            tweenToMeteorAndPickup(meteor, prompt)
+            task.wait(0.3)
+        else
+            task.wait(0.5)
+        end
+        for m in pairs(autoTweenMeteor.processedMetors) do
+            if not m.Parent then autoTweenMeteor.processedMetors[m] = nil end
+        end
+    end
+    autoTweenMeteor.running = false
+end
+
+MainRight:AddToggle('AutoTweenMeteor', {
+    Text    = 'Auto Tween To Meteor',
+    Default = false,
+    Callback = function(value)
+        autoTweenMeteor.enabled = value
+        autoTweenMeteor.processedMetors = {}
+        if value then
+            if not autoTweenMeteor.running then
+                task.spawn(runAutoTweenMeteorLoop)
+            end
+        else
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+        end
+    end,
+})
+end
 MainRight:AddToggle('AutoTrashFarm',{Text='Auto Trash Farm (Legit)',Default=startFlags.AutoTrashFarm,Callback=onAutoTrashLegit})
 if startFlags.AutoTrashFarm then onAutoTrashLegit(true) end
 
@@ -1732,6 +1843,292 @@ local function formatTime(secs)
     secs=math.max(0,math.floor(secs))
     return string.format("%02d : %02d", math.floor(secs/60), secs%60)
 end
+local function buildPreviousTopGui(playerName)
+    local snap = previousTopSnapshots[playerName .. "_current"] and previousTopSnapshots[playerName] or previousTopSnapshots[playerName]
+    if not snap then
+        -- show a small notice gui
+        local old = playerGui:FindFirstChild("PrevTopNoticeGui") if old then old:Destroy() end
+        local sg = Instance.new("ScreenGui")
+        sg.Name = "PrevTopNoticeGui" sg.ResetOnSpawn = false sg.DisplayOrder = 999 sg.Parent = playerGui
+        local frame = Instance.new("Frame")
+        frame.BackgroundColor3 = Color3.fromRGB(10,10,20) frame.BackgroundTransparency = 0.2
+        frame.BorderSizePixel = 0 frame.Size = UDim2.new(0,260,0,54)
+        frame.Position = UDim2.new(0.5,-130,0.5,-27) frame.Parent = sg
+        Instance.new("UICorner",frame).CornerRadius = UDim.new(0,8)
+        local lbl = Instance.new("TextLabel")
+        lbl.BackgroundTransparency = 1 lbl.Size = UDim2.new(1,0,1,0)
+        lbl.Font = Enum.Font.GothamBold lbl.TextSize = 13
+        lbl.TextColor3 = Color3.fromRGB(255,100,100)
+        lbl.Text = "No previous top recorded\nfor " .. (playerName or "this player") .. "."
+        lbl.TextWrapped = true lbl.Parent = frame
+        task.delay(3, function() pcall(function() sg:Destroy() end) end)
+        return
+    end
+
+    local old = playerGui:FindFirstChild("PreviousTopGui") if old then old:Destroy() end
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "PreviousTopGui" sg.ResetOnSpawn = false sg.DisplayOrder = 999 sg.Parent = playerGui
+
+    local frame = Instance.new("Frame")
+    frame.BackgroundColor3 = Color3.fromRGB(10,10,20) frame.BackgroundTransparency = 0.15
+    frame.BorderSizePixel = 0 frame.Size = UDim2.new(0,280,0,420)
+    frame.Position = UDim2.new(1,-585,0.5,-108) frame.Parent = sg
+    Instance.new("UICorner",frame).CornerRadius = UDim.new(0,8)
+
+    -- drag
+    local dragging, dragStart, startPos = false, nil, nil
+    local dragHandle = Instance.new("TextButton")
+    dragHandle.BackgroundTransparency = 1 dragHandle.Size = UDim2.new(1,0,0,36)
+    dragHandle.Position = UDim2.new(0,0,0,0) dragHandle.Text = "" dragHandle.ZIndex = 5 dragHandle.Parent = frame
+    dragHandle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true dragStart = input.Position startPos = frame.Position
+        end
+    end)
+    dragHandle.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset+delta.X, startPos.Y.Scale, startPos.Y.Offset+delta.Y)
+        end
+    end)
+
+    local titleBg = Instance.new("Frame")
+    titleBg.BackgroundColor3 = Color3.fromRGB(20,20,40) titleBg.BackgroundTransparency = 0.2
+    titleBg.BorderSizePixel = 0 titleBg.Size = UDim2.new(1,0,0,36) titleBg.Parent = frame
+    Instance.new("UICorner",titleBg).CornerRadius = UDim.new(0,8)
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.BackgroundTransparency = 1 titleLabel.Size = UDim2.new(1,-44,1,0)
+    titleLabel.Position = UDim2.new(0,10,0,0) titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 13 titleLabel.TextColor3 = Color3.fromRGB(220,180,255)
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.Text = "📦 " .. snap.playerName .. "'s Previous Top" titleLabel.Parent = titleBg
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.BackgroundColor3 = Color3.fromRGB(180,40,40) closeBtn.BackgroundTransparency = 0.2
+    closeBtn.Size = UDim2.new(0,26,0,26) closeBtn.Position = UDim2.new(1,-32,0,5)
+    closeBtn.Font = Enum.Font.GothamBold closeBtn.TextSize = 18 closeBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    closeBtn.Text = "X" closeBtn.ZIndex = 6 closeBtn.Parent = frame
+    Instance.new("UICorner",closeBtn).CornerRadius = UDim.new(0,4)
+    closeBtn.MouseButton1Click:Connect(function() pcall(function() sg:Destroy() end) end)
+
+    local content = Instance.new("Frame")
+    content.BackgroundTransparency = 1 content.Size = UDim2.new(1,-16,1,-46)
+    content.Position = UDim2.new(0,8,0,42) content.Parent = frame
+
+    local y = 0
+    local function makeRow(labelText, valueText, labelColor, valueColor)
+        local row = Instance.new("Frame") row.BackgroundTransparency = 1 row.Size = UDim2.new(1,0,0,20) row.Position = UDim2.new(0,0,0,y) row.Parent = content
+        local lbl = Instance.new("TextLabel") lbl.BackgroundTransparency = 1 lbl.Size = UDim2.new(0.42,0,1,0) lbl.Font = Enum.Font.GothamBold lbl.TextSize = 11 lbl.TextColor3 = labelColor or Color3.fromRGB(160,160,180) lbl.TextXAlignment = Enum.TextXAlignment.Left lbl.TextStrokeTransparency = 0.5 lbl.TextStrokeColor3 = Color3.fromRGB(0,0,0) lbl.Text = labelText lbl.Parent = row
+        local val = Instance.new("TextLabel") val.BackgroundTransparency = 1 val.Size = UDim2.new(0.58,0,1,0) val.Position = UDim2.new(0.42,0,0,0) val.Font = Enum.Font.GothamBold val.TextSize = 11 val.TextColor3 = valueColor or Color3.fromRGB(255,255,255) val.TextXAlignment = Enum.TextXAlignment.Left val.TextStrokeTransparency = 0.5 val.TextStrokeColor3 = Color3.fromRGB(0,0,0) val.Text = valueText or "?" val.TextWrapped = true val.Parent = row
+        y += 22
+        return val
+    end
+    local function makeDivider()
+        local div = Instance.new("Frame") div.BackgroundColor3 = Color3.fromRGB(60,60,80) div.BackgroundTransparency = 0.3 div.BorderSizePixel = 0 div.Size = UDim2.new(1,0,0,1) div.Position = UDim2.new(0,0,0,y) div.Parent = content
+        y += 5
+    end
+    local function makePassionBarStatic(moveNum, moveName, cost)
+        local barBG = Instance.new("Frame") barBG.BackgroundColor3 = Color3.fromRGB(25,25,35) barBG.BorderSizePixel = 0
+        barBG.Size = UDim2.new(1,0,0,7) barBG.Position = UDim2.new(0,0,0,y) barBG.Parent = content
+        Instance.new("UICorner",barBG).CornerRadius = UDim.new(0,3)
+        local barFill = Instance.new("Frame") barFill.BorderSizePixel = 0 barFill.Size = UDim2.new(0,0,1,0)
+        barFill.BackgroundColor3 = Color3.fromRGB(100,100,120) barFill.Parent = barBG
+        Instance.new("UICorner",barFill).CornerRadius = UDim.new(0,3)
+        local pLabel = Instance.new("TextLabel") pLabel.BackgroundTransparency = 1 pLabel.Size = UDim2.new(1,0,0,7)
+        pLabel.Position = UDim2.new(0,0,0,y) pLabel.Font = Enum.Font.GothamBold pLabel.TextSize = 9
+        pLabel.TextColor3 = Color3.fromRGB(120,120,120) pLabel.TextXAlignment = Enum.TextXAlignment.Right
+        pLabel.Text = cost and ("0/"..cost) or "0/?" pLabel.Parent = content
+        y += 14
+    end
+
+    makeRow("Spirit:", snap.spirit, Color3.fromRGB(160,160,180), Color3.fromRGB(180,120,255))
+    makeDivider()
+    makeRow("Crown:", snap.crown, Color3.fromRGB(160,160,180), Color3.fromRGB(255,215,0))
+    makeRow("Body:", snap.body, Color3.fromRGB(160,160,180), Color3.fromRGB(160,220,160))
+    makeRow("Belt:", snap.belt, Color3.fromRGB(160,160,180), Color3.fromRGB(205,133,63))
+    makeRow("Point:", snap.point, Color3.fromRGB(160,160,180), Color3.fromRGB(220,220,220))
+    y += 2 makeDivider()
+    makeRow("Move 1:", snap.move1, Color3.fromRGB(160,160,180), Color3.fromRGB(100,200,255))
+    makePassionBarStatic(1, snap.move1, snap.moveCost1)
+    makeRow("Move 2:", snap.move2, Color3.fromRGB(160,160,180), Color3.fromRGB(100,200,255))
+    makePassionBarStatic(2, snap.move2, snap.moveCost2)
+    makeRow("Move 3:", snap.move3, Color3.fromRGB(160,160,180), Color3.fromRGB(100,200,255))
+    makePassionBarStatic(3, snap.move3, snap.moveCost3)
+    y += 2 makeDivider()
+
+    local typeDisplayColor
+    local tl = snap.typeStr:lower()
+    if tl:find("attack") then typeDisplayColor = Color3.fromRGB(255,60,60)
+    elseif tl:find("stamina") then typeDisplayColor = Color3.fromRGB(255,200,0)
+    elseif tl:find("defense") then typeDisplayColor = Color3.fromRGB(80,200,80)
+    elseif tl:find("balance") then typeDisplayColor = Color3.fromRGB(120,80,200)
+    else typeDisplayColor = Color3.fromRGB(200,200,200) end
+    makeRow("Type:", snap.typeStr, Color3.fromRGB(160,160,180), typeDisplayColor)
+    makeRow("ATK:", snap.attack, Color3.fromRGB(160,160,180), Color3.fromRGB(255,80,80))
+    makeRow("DEF:", snap.defense, Color3.fromRGB(160,160,180), Color3.fromRGB(80,220,80))
+    makeRow("STA:", snap.stamina, Color3.fromRGB(160,160,180), Color3.fromRGB(255,200,0))
+    y += 2 makeDivider()
+
+    -- Static RPM bar at 100%
+    local rpmLabel = Instance.new("TextLabel") rpmLabel.BackgroundTransparency = 1 rpmLabel.Size = UDim2.new(0.42,0,0,18) rpmLabel.Position = UDim2.new(0,0,0,y) rpmLabel.Font = Enum.Font.GothamBold rpmLabel.TextSize = 11 rpmLabel.TextColor3 = Color3.fromRGB(160,160,180) rpmLabel.TextXAlignment = Enum.TextXAlignment.Left rpmLabel.Text = "RPM:" rpmLabel.Parent = content
+    local rpmValLabel = Instance.new("TextLabel") rpmValLabel.BackgroundTransparency = 1 rpmValLabel.Size = UDim2.new(0.38,0,0,18) rpmValLabel.Position = UDim2.new(0.42,0,0,y) rpmValLabel.Font = Enum.Font.GothamBold rpmValLabel.TextSize = 11 rpmValLabel.TextColor3 = Color3.fromRGB(180,80,255) rpmValLabel.TextXAlignment = Enum.TextXAlignment.Left rpmValLabel.Text = snap.maxRPM > 0 and (snap.maxRPM .. " / " .. snap.maxRPM) or "?" rpmValLabel.Parent = content
+    local rpmPctLabel = Instance.new("TextLabel") rpmPctLabel.BackgroundTransparency = 1 rpmPctLabel.Size = UDim2.new(0.2,0,0,18) rpmPctLabel.Position = UDim2.new(0.8,0,0,y) rpmPctLabel.Font = Enum.Font.GothamBold rpmPctLabel.TextSize = 13 rpmPctLabel.TextColor3 = Color3.fromRGB(180,80,255) rpmPctLabel.TextXAlignment = Enum.TextXAlignment.Right rpmPctLabel.Text = "100%" rpmPctLabel.Parent = content
+    y += 20
+    local rpmBarBG = Instance.new("Frame") rpmBarBG.BackgroundColor3 = Color3.fromRGB(30,30,40) rpmBarBG.BorderSizePixel = 0 rpmBarBG.Size = UDim2.new(1,0,0,14) rpmBarBG.Position = UDim2.new(0,0,0,y) rpmBarBG.Parent = content
+    Instance.new("UICorner",rpmBarBG).CornerRadius = UDim.new(0,3)
+    local rpmBarFill = Instance.new("Frame") rpmBarFill.BackgroundColor3 = Color3.fromRGB(180,80,255) rpmBarFill.BorderSizePixel = 0 rpmBarFill.Size = UDim2.new(1,0,1,0) rpmBarFill.Parent = rpmBarBG
+    Instance.new("UICorner",rpmBarFill).CornerRadius = UDim.new(0,3)
+end
+-- ── Previous Top Snapshot System ──────────────────────────────────────────────
+local function snapshotTop(top)
+    if not top or not top.Parent then return nil end
+    local uid = tonumber(top.Name)
+    local playerName = nil
+    if uid then
+        local p = Players:GetPlayerByUserId(uid)
+        if p then playerName = p.Name end
+    end
+    if not playerName then return nil end
+    local function safePart(inst, partName)
+        local part = inst:FindFirstChild(partName) if not part then return "?" end
+        local n = part:GetAttribute("Name")
+        if n and tostring(n) ~= "" then return tostring(n) end
+        return part.Name ~= partName and part.Name or "?"
+    end
+    local function safePartWithMode(inst, partName)
+        local baseName = safePart(inst, partName) if baseName == "?" then return "?" end
+        local rawMode = _getPartMode(inst:FindFirstChild(partName))
+        if rawMode then local display = _resolveMode(baseName, rawMode) if display then return baseName.." ("..display..")" end end
+        return baseName
+    end
+    local maxHealth = tonumber(top:GetAttribute("MaxHealth")) or 0
+    local maxRPM = maxHealth > 0 and math.floor(maxHealth * 20) or 0
+    local function resolveMoveSnap(attrName)
+        local val = _topAttr(top, attrName) if val == "?" then return "None" end
+        return val:gsub("(%l)(%u)", "%1 %2"):gsub("(%u)(%u%l)", "%1 %2")
+    end
+    local move1 = resolveMoveSnap("SignatureMove_1")
+    local move2 = resolveMoveSnap("SignatureMove_2")
+    local move3 = resolveMoveSnap("SignatureMove_3")
+    local rawType = top:GetAttribute("Type") or top:GetAttribute("Style") or "?"
+    return {
+        playerName = playerName,
+        spirit     = _topAttr(top, "Spirit"),
+        crown      = safePart(top, "Crown"),
+        body       = safePartWithMode(top, "Body"),
+        belt       = safePartWithMode(top, "Belt"),
+        point      = safePart(top, "Point"),
+        move1=move1, move2=move2, move3=move3,
+        moveCost1=getMoveCost(move1), moveCost2=getMoveCost(move2), moveCost3=getMoveCost(move3),
+        typeStr    = tostring(rawType),
+        attack     = _topAttr(top, "Attack"),
+        defense    = _topAttr(top, "Defense"),
+        stamina    = _topAttr(top, "Stamina"),
+        maxRPM     = maxRPM,
+    }
+end
+
+local function startSnapshotTracker()
+    local trackedTops = {}
+    local function trackTop(top)
+        if trackedTops[top] then return end
+        trackedTops[top] = true
+        task.wait(0.001)
+        if not top or not top.Parent then trackedTops[top]=nil return end
+        local uid = tonumber(top.Name)
+        if not uid or not Players:GetPlayerByUserId(uid) then trackedTops[top]=nil return end
+        -- Take launch snapshot as currentBuild
+        local currentBuild = snapshotTop(top)
+        if not currentBuild then trackedTops[top]=nil return end
+        local playerName = currentBuild.playerName
+        -- Each new launch: the snapshot from last launch becomes "previous", current launch becomes "current"
+        if previousTopSnapshots[playerName] then
+            -- Shift: last current becomes previous
+            previousTopSnapshots[playerName] = previousTopSnapshots[playerName .. "_current"] or previousTopSnapshots[playerName]
+        end
+        -- Save this launch as the new current
+        previousTopSnapshots[playerName .. "_current"] = currentBuild
+        -- If no previous yet, use this launch as both
+        if not previousTopSnapshots[playerName] then
+            previousTopSnapshots[playerName] = currentBuild
+        end
+local swapping = false
+
+        local function saveAndUpdate()
+            if swapping then return end
+            swapping = true
+            previousTopSnapshots[playerName] = {
+                playerName = currentBuild.playerName,
+                spirit     = currentBuild.spirit,
+                crown      = currentBuild.crown,
+                body       = currentBuild.body,
+                belt       = currentBuild.belt,
+                point      = currentBuild.point,
+                move1      = currentBuild.move1,
+                move2      = currentBuild.move2,
+                move3      = currentBuild.move3,
+                moveCost1  = currentBuild.moveCost1,
+                moveCost2  = currentBuild.moveCost2,
+                moveCost3  = currentBuild.moveCost3,
+                typeStr    = currentBuild.typeStr,
+                attack     = currentBuild.attack,
+                defense    = currentBuild.defense,
+                stamina    = currentBuild.stamina,
+                maxRPM     = currentBuild.maxRPM,
+            }
+            task.delay(0.001, function()
+                if not top or not top.Parent then swapping = false return end
+                local newSnap = snapshotTop(top)
+                if newSnap then
+                    currentBuild = newSnap
+                end
+                swapping = false
+            end)
+        end
+
+        top.ChildRemoved:Connect(function(child)
+            local partNames = {Crown=true, Body=true, Belt=true, Point=true}
+            if not partNames[child.Name] then return end
+            saveAndUpdate()
+        end)
+
+        top.ChildAdded:Connect(function(child)
+            local partNames = {Crown=true, Body=true, Belt=true, Point=true}
+            if not partNames[child.Name] then return end
+            saveAndUpdate()
+        end)
+
+        local function watchPartName(part)
+            if not part or not part:IsA("BasePart") then return end
+            part.AttributeChanged:Connect(function(attrName)
+                if attrName ~= "Name" then return end
+                saveAndUpdate()
+            end)
+        end
+        for _, child in ipairs(top:GetChildren()) do
+            watchPartName(child)
+        end
+        top.ChildAdded:Connect(function(child) watchPartName(child) end)
+
+        top.AttributeChanged:Connect(function(attrName)
+            local watched = {Spirit=true,SignatureMove_1=true,SignatureMove_2=true,SignatureMove_3=true}
+            if not watched[attrName] then return end
+            saveAndUpdate()
+        end)
+        top.AncestryChanged:Connect(function()
+            if not top.Parent then trackedTops[top]=nil end
+        end)
+    end
+    workspace.Tops.ChildAdded:Connect(function(top)
+        task.spawn(trackTop, top)
+    end)
+    for _, top in ipairs(workspace.Tops:GetChildren()) do
+        task.spawn(trackTop, top)
+    end
+end
+startSnapshotTracker()
 local function isRealMeteor(child) return child:IsA("Model") or child:IsA("Part") or child:IsA("BasePart") end
 local function getLiveMeteorCount()
     local count=0
@@ -2470,7 +2867,7 @@ local function buildViewerGui(playerName, top)
         rpmReqLabel.Text=""
         rpmReqLabel.Visible=false
         rpmReqLabel.Parent=content
-        passionBarFills[moveNum]={fill=barFill,label=pLabel,cost=cost,rpmReq=rpmReqLabel}
+        passionBarFills[moveNum]={fill=barFill,label=pLabel,cost=cost}
     end
 
     local function resolveMoveName(top, attrName)
@@ -2543,10 +2940,10 @@ local function buildViewerGui(playerName, top)
         viewer._drainMine={} viewer._drainOpp={} viewer._lastSampleTime=0
         viewer._fightEndHandled=nil
     end
-    local SAMPLE_INTERVAL=0.5
+    local SAMPLE_INTERVAL=0.1
     local EVEN_THRESHOLD=3
     viewer.liveConn=RunService.Heartbeat:Connect(function(dt)
-        updateInterval+=dt if updateInterval<0.05 then return end updateInterval=0
+        updateInterval+=dt if updateInterval<0.016 then return end updateInterval=0
         if not top or not top.Parent then
             if viewer._fightEndHandled==false then
                 viewer._fightEndHandled=true
@@ -2623,85 +3020,107 @@ local function buildViewerGui(playerName, top)
         rpmBarFill.Size=UDim2.new(pct,0,1,0)
         local displayState=(state~="" and state or "Idle")
         stateValLabel.Text=displayState stateValLabel.TextColor3=STATE_COLORS[state] or Color3.fromRGB(200,200,200)
-        -- Match status calculation
+-- Match status calculation
         do
             local myId=tostring(LocalPlayer.UserId)
             local myTop2=workspace.Tops:FindFirstChild(myId)
-            local now2=tick()
             local statusText="Waiting..." local statusColor=Color3.fromRGB(200,200,200)
-            local myInFight = myTop2 and myTop2.Parent and myTop2:GetAttribute("IsStadiumFight")==true and (myTop2:GetAttribute("Health") or 0)>0
-            if myInFight and top and top.Parent and top.Name~=myId then
-                local myH=myTop2:GetAttribute("Health") or 0
-                local myMH=myTop2:GetAttribute("MaxHealth") or 1
-                local oppH=top:GetAttribute("Health") or 0
-                local oppMH=top:GetAttribute("MaxHealth") or 1
-                local myPct=myH/math.max(myMH,1)
-                local oppPct=oppH/math.max(oppMH,1)
-                if now2-viewer._lastSampleTime>=SAMPLE_INTERVAL then
-                    viewer._lastSampleTime=now2
-                    table.insert(viewer._drainMine,myPct)
-                    table.insert(viewer._drainOpp,oppPct)
-                    if #viewer._drainMine>6 then table.remove(viewer._drainMine,1) end
-                    if #viewer._drainOpp>6 then table.remove(viewer._drainOpp,1) end
-                end
-                if #viewer._drainMine>=2 then
-                    local myDrainRate=(viewer._drainMine[1]-viewer._drainMine[#viewer._drainMine])/((#viewer._drainMine-1)*SAMPLE_INTERVAL)
-                    local oppDrainRate=(viewer._drainOpp[1]-viewer._drainOpp[#viewer._drainOpp])/((#viewer._drainOpp-1)*SAMPLE_INTERVAL)
-                    local myDrain=math.max(myDrainRate,0.0001)
-                    local oppDrain=math.max(oppDrainRate,0.0001)
-                    local myTimeLeft=myPct/myDrain
-                    local oppTimeLeft=oppPct/oppDrain
-                    if math.abs(myTimeLeft-oppTimeLeft)<=EVEN_THRESHOLD then
-                        statusText="Even" statusColor=Color3.fromRGB(200,200,200)
-                        viewer._myMatchStatus="Even" viewer._myMatchStatusColor=Color3.fromRGB(200,200,200)
-                    elseif myTimeLeft>oppTimeLeft then
-                        statusText="Losing" statusColor=Color3.fromRGB(255,60,60)
-                        viewer._myMatchStatus="Winning" viewer._myMatchStatusColor=Color3.fromRGB(100,255,100)
+            local myH = myTop2 and (myTop2:GetAttribute("Health") or 0) or 0
+            local myMH = myTop2 and (myTop2:GetAttribute("MaxHealth") or 1) or 1
+            local oppH = top and top.Parent and (top:GetAttribute("Health") or 0) or 0
+            local oppMH = top and top.Parent and (top:GetAttribute("MaxHealth") or 1) or 1
+            local myInFight = myTop2 and myTop2.Parent and myTop2:GetAttribute("IsStadiumFight")==true
+            local myDead = myH <= 0
+            local oppDead = oppH <= 0
+            if myInFight then
+                if not myDead and not oppDead then
+                    local myPct = myH/math.max(myMH,1)
+                    local oppPct = oppH/math.max(oppMH,1)
+                    local now2 = tick()
+                    if now2-viewer._lastSampleTime>=SAMPLE_INTERVAL then
+                        viewer._lastSampleTime=now2
+                        table.insert(viewer._drainMine,myPct)
+                        table.insert(viewer._drainOpp,oppPct)
+                        if #viewer._drainMine>6 then table.remove(viewer._drainMine,1) end
+                        if #viewer._drainOpp>6 then table.remove(viewer._drainOpp,1) end
+                    end
+                    if #viewer._drainMine>=2 then
+                        local myDrainRate=(viewer._drainMine[1]-viewer._drainMine[#viewer._drainMine])/((#viewer._drainMine-1)*SAMPLE_INTERVAL)
+                        local oppDrainRate=(viewer._drainOpp[1]-viewer._drainOpp[#viewer._drainOpp])/((#viewer._drainOpp-1)*SAMPLE_INTERVAL)
+                        local myDrain=math.max(myDrainRate,0.0001)
+                        local oppDrain=math.max(oppDrainRate,0.0001)
+                        local myTimeLeft=myPct/myDrain
+                        local oppTimeLeft=oppPct/oppDrain
+                        local myScore = myPct * 0.4 + (myTimeLeft / math.max(myTimeLeft + oppTimeLeft, 0.001)) * 0.6
+                        local oppScore = oppPct * 0.4 + (oppTimeLeft / math.max(myTimeLeft + oppTimeLeft, 0.001)) * 0.6
+                        local diff = myScore - oppScore
+                        if math.abs(diff) <= 0.04 then
+                            statusText="Even" statusColor=Color3.fromRGB(200,200,200)
+                        elseif diff > 0 then
+                            statusText="Winning" statusColor=Color3.fromRGB(100,255,100)
+                        else
+                            statusText="Losing" statusColor=Color3.fromRGB(255,60,60)
+                        end
                     else
-                        statusText="Winning" statusColor=Color3.fromRGB(100,255,100)
-                        viewer._myMatchStatus="Losing" viewer._myMatchStatusColor=Color3.fromRGB(255,60,60)
+                        statusText="Waiting..."
                     end
+                    viewer._myMatchStatus=statusText=="Winning" and "Winning" or statusText=="Losing" and "Losing" or "Even"
+                    viewer._myMatchStatusColor=statusColor
+                    viewer._oppMatchStatus=statusText=="Winning" and "Losing" or statusText=="Losing" and "Winning" or "Even"
+                    viewer._oppMatchStatusColor=statusText=="Winning" and Color3.fromRGB(255,60,60) or statusText=="Losing" and Color3.fromRGB(100,255,100) or Color3.fromRGB(200,200,200)
                     viewer._fightEndHandled=false
-                else
-                    statusText="Waiting..."
-                end
-            else
-                local myId2=tostring(LocalPlayer.UserId)
-                local myTop3=workspace.Tops:FindFirstChild(myId2)
-                local myStillFighting = myTop3 and myTop3.Parent and myTop3:GetAttribute("IsStadiumFight")==true and (myTop3:GetAttribute("Health") or 0)>0
-                if myStillFighting then
-                    statusText="No Other Tops..." statusColor=Color3.fromRGB(160,160,180)
-                elseif viewer._fightEndHandled==false then
-                    viewer._fightEndHandled=true
-                    local endText,endColor
-                    if viewer._myMatchStatus=="Winning" then
-                        endText="Won!" endColor=Color3.fromRGB(100,255,100)
-                    elseif viewer._myMatchStatus=="Losing" then
-                        endText="Lost!" endColor=Color3.fromRGB(255,60,60)
-                    end
-                    if endText then
-                        viewer._myMatchStatus=endText viewer._myMatchStatusColor=endColor
-                        statusText=endText statusColor=endColor
-                        task.delay(3,function()
+                elseif oppDead and not myDead then
+                    if viewer._fightEndHandled~=true then
+                        viewer._fightEndHandled=true
+                        viewer._myMatchStatus="Won!" viewer._myMatchStatusColor=Color3.fromRGB(100,255,100)
+                        viewer._oppMatchStatus="Lost!" viewer._oppMatchStatusColor=Color3.fromRGB(255,60,60)
+                        task.delay(8,function()
                             viewer._myMatchStatus=nil viewer._myMatchStatusColor=nil
                             viewer._fightEndHandled=nil
                             viewer._drainMine={} viewer._drainOpp={} viewer._lastSampleTime=0
                         end)
-                    else
-                        viewer._myMatchStatus=nil viewer._myMatchStatusColor=nil
-                        viewer._fightEndHandled=nil
-                        viewer._drainMine={} viewer._drainOpp={} viewer._lastSampleTime=0
-                        statusText="Waiting..."
                     end
-                elseif viewer._fightEndHandled==true then
+                    statusText=viewer._myMatchStatus or "Won!" statusColor=viewer._myMatchStatusColor or Color3.fromRGB(100,255,100)
+                elseif myDead and not oppDead then
+                    if viewer._fightEndHandled~=true then
+                        viewer._fightEndHandled=true
+                        viewer._myMatchStatus="Lost!" viewer._myMatchStatusColor=Color3.fromRGB(255,60,60)
+                        viewer._oppMatchStatus="Won!" viewer._oppMatchStatusColor=Color3.fromRGB(100,255,100)
+                        task.delay(8,function()
+                            viewer._myMatchStatus=nil viewer._myMatchStatusColor=nil
+                            viewer._fightEndHandled=nil
+                            viewer._drainMine={} viewer._drainOpp={} viewer._lastSampleTime=0
+                        end)
+                    end
+                    statusText=viewer._myMatchStatus or "Lost!" statusColor=viewer._myMatchStatusColor or Color3.fromRGB(255,60,60)
+                elseif myDead and oppDead then
+                    if viewer._fightEndHandled~=true then
+                        viewer._fightEndHandled=true
+                        viewer._myMatchStatus="Tied!" viewer._myMatchStatusColor=Color3.fromRGB(200,200,100)
+                        viewer._oppMatchStatus="Tied!" viewer._oppMatchStatusColor=Color3.fromRGB(200,200,100)
+                        task.delay(8,function()
+                            viewer._myMatchStatus=nil viewer._myMatchStatusColor=nil
+                            viewer._fightEndHandled=nil
+                            viewer._drainMine={} viewer._drainOpp={} viewer._lastSampleTime=0
+                        end)
+                    end
+                    statusText=viewer._myMatchStatus or "Tied!" statusColor=viewer._myMatchStatusColor or Color3.fromRGB(200,200,100)
+                end
+            else
+                if viewer._fightEndHandled==true then
                     statusText=viewer._myMatchStatus or "Waiting..."
                     statusColor=viewer._myMatchStatusColor or Color3.fromRGB(200,200,200)
                 else
+                    viewer._myMatchStatus=nil viewer._myMatchStatusColor=nil
+                    viewer._fightEndHandled=nil
+                    viewer._drainMine={} viewer._drainOpp={} viewer._lastSampleTime=0
                     statusText="Waiting..."
                 end
             end
             if matchStatusLabel and matchStatusLabel.Parent then
-                matchStatusLabel.Text=statusText matchStatusLabel.TextColor3=statusColor
+                local oppText=viewer._oppMatchStatus or statusText
+                local oppColor=viewer._oppMatchStatusColor or statusColor
+                matchStatusLabel.Text=oppText matchStatusLabel.TextColor3=oppColor
             end
             if matchStatusKey and matchStatusKey.Parent then
                 matchStatusKey.TextColor3=Color3.fromRGB(160,160,180)
@@ -2732,25 +3151,6 @@ local function buildViewerGui(playerName, top)
                         bd.label.Text=math.floor(passion).."/"..maxPassion
                     else bd.fill.Size=UDim2.new(0,0,1,0) bd.label.Text=math.floor(passion).."/?" end
                 end
-                if bd.rpmReq then
-                    local reqText=""
-                    local moveName=({move1,move2,move3})[moveNum]
-                    local isNone=(not moveName or moveName=="None" or moveName=="none" or moveName=="?")
-                    if not isNone then
-                        pcall(function()
-                            local movesFrame=playerGui.HUD["Top UI"].Moves["Move "..moveNum].Passion
-                            local lessHealth=movesFrame:FindFirstChild("LessHealth")
-                            local moreHealth=movesFrame:FindFirstChild("MoreHealth")
-                            if lessHealth and lessHealth.Visible then
-                                reqText="Requires lower RPM"
-                            elseif moreHealth and moreHealth.Visible then
-                                reqText="Requires higher RPM"
-                            end
-                        end)
-                    end
-                    bd.rpmReq.Visible = reqText ~= ""
-                    if reqText ~= "" then bd.rpmReq.Text=reqText end
-                end
             end
         end
     end)
@@ -2762,7 +3162,10 @@ ESPViewer:AddButton('View Selected Player Top',function()
     local top=getTopForPlayer(viewer.selectedPlayer)
     buildViewerGui(viewer.selectedPlayer,top)
 end)
-ESPViewer:AddButton('Close Top Viewer',function() destroyViewerGui() end)
+ESPViewer:AddButton('View Previous Player Top',function()
+    if not viewer.selectedPlayer or viewer.selectedPlayer == "" then return end
+    buildPreviousTopGui(viewer.selectedPlayer)
+end)
 ESPViewer:AddButton('Refresh Players',function() viewerDropdown:SetValues(getPlayerList()) end)
 
 -- Auto Opponent Viewer
@@ -3217,7 +3620,7 @@ local function buildExtraStatsGui()
     local updateInterval = 0
     extraStatsConn = RunService.Heartbeat:Connect(function(dt)
         updateInterval += dt
-        if updateInterval < 0.2 then return end
+        if updateInterval < 0.015 then return end
         updateInterval = 0
 
         local top = viewer.currentTop
@@ -3320,6 +3723,37 @@ MiscLeft:AddButton('Debug Match Status',function()
     print("currentTop:", tostring(viewer.currentTop))
     local myTop = workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
     print("myTop:", tostring(myTop))
+end)
+
+MiscLeft:AddButton('Debug Swap Test',function()
+    local myTop = getMyTop()
+    if not myTop then print("NO TOP IN WORKSPACE") return end
+    print("Top found:", myTop.Name)
+    print("Children:")
+    for _, child in ipairs(myTop:GetChildren()) do
+        print("  ", child.Name, child.ClassName)
+        for k,v in pairs(child:GetAttributes()) do
+            print("    ", k, "=", tostring(v))
+        end
+    end
+    print("Snapshot table:")
+    for k,v in pairs(previousTopSnapshots) do
+        print("  ", k, "->", v.body)
+    end
+end)
+
+MiscLeft:AddButton('Debug Snapshots',function()
+    print("=== SNAPSHOT TABLE ===")
+    for name, snap in pairs(previousTopSnapshots) do
+        print("Player:", name)
+        print("  Body:", snap.body)
+        print("  Belt:", snap.belt)
+        print("  Crown:", snap.crown)
+        print("  Point:", snap.point)
+    end
+    if not next(previousTopSnapshots) then
+        print("(empty - nothing recorded yet)")
+    end
 end)
 
 MiscLeft:AddButton('Debug My Top',function()
