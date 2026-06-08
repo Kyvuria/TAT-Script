@@ -377,6 +377,22 @@ local function blatantTweenTo(hrp, targetPos, farmCheck)
         end
     end
 end
+local function tweenWalkTo(hrp, target, timeout, blacklistKey, farmCheck)
+    local dist = (hrp.Position - target).Magnitude
+    if dist < 1 then return true end
+    local duration = math.max(dist / 60, 0.05)
+    local tweenDone = false
+    local tween = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = CFrame.new(target)})
+    tween.Completed:Connect(function() tweenDone = true end)
+    tween:Play()
+    local t = tick() + (timeout or 30)
+    repeat task.wait(0.1)
+        if farmCheck and not farmCheck() then tween:Cancel() return false end
+    until tweenDone or tick() > t
+    local arrived = (hrp.Position - target).Magnitude < 8
+    if not arrived and blacklistKey then farmState.trashBlacklist[blacklistKey] = true end
+    return arrived
+end
 local function blatantWalkTo(hrp, humanoid, target, timeout, blacklistKey, farmCheck)
     if not moveState.isUnderground then goUnderground(hrp) end
     blatantTweenTo(hrp, target, farmCheck)
@@ -446,18 +462,16 @@ local function runFarmLoop(farmCheck, blatant)
     end
     local lastTrashCount=-1 local lastIncreaseTime=tick() local hasPickedUp=false
     startAutoSprint(farmCheck)
-    if blatant then startNoclip() moveState.lastGroundTouch=tick() end
+    local antiGravConn = nil
     while farmCheck() do
         local hrp, humanoid = getChar()
         if not hrp or not humanoid then task.wait(1) continue end
         local cur, max = getTrashCount(true)
         if cur ~= lastTrashCount then lastTrashCount=cur lastIncreaseTime=tick() end
         if tick()-lastIncreaseTime > 10 then
-            if moveState.isUnderground then surfaceUp(hrp) end
             LocalPlayer.Character:BreakJoints()
-            task.wait(4) moveState.isUnderground=false
+            task.wait(4)
             startAutoSprint(farmCheck)
-            if blatant then startNoclip() moveState.lastGroundTouch=tick() end
             lastIncreaseTime=tick() lastTrashCount=-1 hasPickedUp=false
             continue
         end
@@ -465,7 +479,7 @@ local function runFarmLoop(farmCheck, blatant)
             if moveState.isUnderground then local h=getChar() if h then surfaceUp(h) end end
             local dumpster = getAvailableDumpster()
             if dumpster then
-                local arrived = walkTo(hrp,humanoid,dumpster.pos,30,nil,farmCheck)
+                local arrived = blatant and tweenWalkTo(hrp,dumpster.pos,30,nil,farmCheck) or walkTo(hrp,humanoid,dumpster.pos,30,nil,farmCheck)
                 if arrived then
                     randomWait(0.3,0.7)
                     local prompt = dumpster.part:FindFirstChild("Prompt")
@@ -496,7 +510,7 @@ local function runFarmLoop(farmCheck, blatant)
             end
             if nearest then
                 local arrived
-                if blatant then arrived=blatantWalkTo(hrp2,humanoid2,nearest.Position,20,nearestKey,farmCheck)
+                if blatant then arrived=tweenWalkTo(hrp2,nearest.Position,20,nearestKey,farmCheck)
                 else arrived=walkTo(hrp2,humanoid2,nearest.Position,20,nearestKey,farmCheck) end
                 if arrived and nearestPrompt and nearestPrompt.Enabled then
                     fireproximityprompt(nearestPrompt) hasPickedUp=true lastIncreaseTime=tick() task.wait(0.3)
@@ -506,12 +520,6 @@ local function runFarmLoop(farmCheck, blatant)
         task.wait(0.1)
     end
     stopAutoSprint()
-    if blatant then
-        stopNoclip()
-        local h = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if h and moveState.isUnderground then surfaceUp(h) end
-        moveState.isUnderground=false
-    end
 end
 
 -- ── Bey helpers ───────────────────────────────────────────────────────────────
@@ -1660,10 +1668,7 @@ local function onAutoTrashBlatant(value)
     if value then
         task.spawn(function() runFarmLoop(function() return farmState.blatantRunning end, true) end)
     else
-        farmState.blatantRunning=false stopAutoSprint() stopNoclip()
-        local h = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if h and moveState.isUnderground then surfaceUp(h) end
-        moveState.isUnderground=false
+        farmState.blatantRunning=false stopAutoSprint()
     end
 end
 toggleCallbacks["AutoTrashFarmBlatant"]=onAutoTrashBlatant
