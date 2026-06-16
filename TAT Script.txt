@@ -1722,6 +1722,348 @@ Main1v1:AddButton('Tween To 1v1 Arena',function()
     tween:Play() tween.Completed:Connect(function() task.spawn(runACBypassTimer) end)
 end)
 
+-- ── Auto Guard-Switch ─────────────────────────────────────────────────────────
+-- Paste AFTER the 'Tween To 1v1 Arena' end) block inside Main1v1
+
+Main1v1:AddLabel(' ')
+
+do
+local guardSwitch = {
+    enabled         = false,
+    mode            = "Barrage",
+    rpmThreshold    = 1.10,
+    switchInterval  = 3.0,       -- default 3s between cycles
+    conn            = nil,
+    isSwitching     = false,
+    disabledByRPM   = false,
+    inGuard         = false,
+    lastCycleTime   = 0,         -- when the LAST full cycle completed
+    wasInFight      = false,
+}
+
+-- ── Approach tracker ──────────────────────────────────────────────────────────
+-- We track a rolling window of distances so we can tell if the beys
+-- are genuinely closing in on each other vs just orbiting nearby.
+local approach = {
+    history     = {},   -- ring buffer of last N distances
+    MAX_HISTORY = 6,    -- frames to look back
+    NEAR_DIST   = 12,   -- studs: "they are close"
+    CLOSE_DIST  = 8,    -- studs: "impact imminent"
+    triggered   = false,-- so we only fire once per approach
+}
+
+local function resetApproach()
+    approach.history = {}
+    approach.triggered = false
+end
+
+-- Returns true the FIRST time the beys cross CLOSE_DIST while already
+-- having been within NEAR_DIST for at least a few frames.
+local function checkApproach(myTop, oppTop)
+    if not myTop or not oppTop then resetApproach() return false end
+
+    local ok1, myPos  = pcall(function() return myTop:GetPivot().Position end)
+    local ok2, oppPos = pcall(function() return oppTop:GetPivot().Position end)
+    if not ok1 or not ok2 then return false end
+
+    local dist = (myPos - oppPos).Magnitude
+
+    -- push to history ring
+    table.insert(approach.history, dist)
+    if #approach.history > approach.MAX_HISTORY then
+        table.remove(approach.history, 1)
+    end
+
+    -- need at least a few samples
+    if #approach.history < 3 then return false end
+
+    -- already fired this approach cycle
+    if approach.triggered then
+        -- reset trigger once they separate again so next approach works
+        if dist > approach.NEAR_DIST then
+            approach.triggered = false
+        end
+        return false
+    end
+
+    -- check: distance is shrinking AND we just crossed into CLOSE_DIST
+    local prev = approach.history[#approach.history - 1]
+    local shrinking = dist < prev
+    local closeEnough = dist <= approach.CLOSE_DIST
+
+    -- also require we spent a couple frames in NEAR range already
+    local hadNearFrames = false
+    for i = 1, #approach.history - 1 do
+        if approach.history[i] <= approach.NEAR_DIST then
+            hadNearFrames = true
+            break
+        end
+    end
+
+    if closeEnough and shrinking and hadNearFrames then
+        approach.triggered = true
+        return true
+    end
+
+    return false
+end
+
+-- ── Helpers ───────────────────────────────────────────────────────────────────
+
+local function getMyTopGS()
+    return workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
+end
+
+local function getOppTopGS()
+    local oppTop = viewer.currentTop
+    if oppTop and oppTop.Parent then return oppTop end
+    local myTop = getMyTopGS()
+    if not myTop then return nil end
+    local ok0, myPivot = pcall(function() return myTop:GetPivot().Position end)
+    if not ok0 then return nil end
+    local closest, closestDist = nil, math.huge
+    for _, top in ipairs(workspace.Tops:GetChildren()) do
+        if top.Name == tostring(LocalPlayer.UserId) then continue end
+        local h = top:GetAttribute("Health")
+        if not h or h <= 0 then continue end
+        local ok, pivot = pcall(function() return top:GetPivot().Position end)
+        if ok then
+            local d = (myPivot - pivot).Magnitude
+            if d < 80 and d < closestDist then closestDist = d closest = top end
+        end
+    end
+    return closest
+end
+
+local function getOppTypeGS()
+    local oppTop = getOppTopGS()
+    if not oppTop then return nil end
+    local raw = tostring(oppTop:GetAttribute("Type") or oppTop:GetAttribute("Style") or "")
+    if raw:lower():find("attack") then return "Attack" end
+    return nil
+end
+
+local function getRPMPct(top)
+    if not top or not top.Parent then return 0 end
+    local h  = top:GetAttribute("Health")    or 0
+    local mh = top:GetAttribute("MaxHealth") or 1
+    if mh <= 0 then return 0 end
+    return h / mh
+end
+
+local function pressGFast()
+    VirtualInputManager:SendKeyEvent(true,  Enum.KeyCode.G, false, game)
+    task.wait(0.04)
+    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.G, false, game)
+end
+
+local function getCurrentStateGS()
+    local myTop = getMyTopGS()
+    if not myTop then return nil end
+    return tostring(myTop:GetAttribute("State") or "")
+end
+
+local function forceState(target)
+    for _ = 1, 4 do
+        local cur = getCurrentStateGS()
+        if cur == target then return true end
+        pressGFast()
+        task.wait(0.08)
+    end
+    return getCurrentStateGS() == target
+end
+
+-- ── Reset helper called between fights ───────────────────────────────────────
+local function resetFightState()
+    guardSwitch.wasInFight    = false
+    guardSwitch.disabledByRPM = false
+    guardSwitch.inGuard       = false
+    guardSwitch.isSwitching   = false
+    guardSwitch.lastCycleTime = 0
+    resetApproach()
+end
+
+-- ── Stop ─────────────────────────────────────────────────────────────────────
+local function stopGuardSwitch()
+    if guardSwitch.conn then
+        guardSwitch.conn:Disconnect()
+        guardSwitch.conn = nil
+    end
+    resetFightState()
+    task.spawn(function()
+        task.wait(0.05)
+        if getCurrentStateGS() == "Guarding" then
+            forceState("Attacking")
+        end
+    end)
+end
+
+-- ── Barrage cycle ─────────────────────────────────────────────────────────────
+-- Triggered when beys are about to collide.
+-- Guard BEFORE hit → stay in Guard through hit → Attack after.
+local function doBarrageCycle()
+    if guardSwitch.isSwitching then return end
+    guardSwitch.isSwitching = true
+    guardSwitch.lastCycleTime = tick()   -- stamp NOW so interval resets immediately
+
+    task.spawn(function()
+        -- Enter Guard before the hit
+        forceState("Guarding")
+        guardSwitch.inGuard = true
+
+        -- Hold Guard long enough for the collision to land and resolve
+        -- (0.45s is the post-hit window; tweak if needed)
+        task.wait(0.45)
+
+        -- Return to Attack
+        forceState("Attacking")
+        guardSwitch.inGuard     = false
+        guardSwitch.isSwitching = false
+    end)
+end
+
+-- ── Smash cycle ───────────────────────────────────────────────────────────────
+-- Guard very briefly then snap back to Attack right before actual contact.
+local function doSmashCycle()
+    if guardSwitch.isSwitching then return end
+    guardSwitch.isSwitching = true
+    guardSwitch.lastCycleTime = tick()
+
+    task.spawn(function()
+        forceState("Guarding")
+        guardSwitch.inGuard = true
+
+        task.wait(0.12)   -- very short window then snap back before impact
+
+        forceState("Attacking")
+        guardSwitch.inGuard     = false
+        guardSwitch.isSwitching = false
+    end)
+end
+
+-- ── Main loop ─────────────────────────────────────────────────────────────────
+local function startGuardSwitch()
+    stopGuardSwitch()
+
+    guardSwitch.conn = RunService.Heartbeat:Connect(function()
+        if not guardSwitch.enabled then return end
+
+        -- ── Fight gate ────────────────────────────────────────────────────────
+        local myTop = getMyTopGS()
+        if not myTop then
+            if guardSwitch.wasInFight then resetFightState() end
+            return
+        end
+
+        local inFight = myTop:GetAttribute("IsStadiumFight") == true
+        if not inFight then
+            if guardSwitch.wasInFight then resetFightState() end
+            return
+        end
+        guardSwitch.wasInFight = true
+
+        local myHealth = myTop:GetAttribute("Health") or 0
+        if myHealth <= 0 then return end
+
+        -- ── Opponent type gate ────────────────────────────────────────────────
+        if getOppTypeGS() ~= "Attack" then
+            if guardSwitch.inGuard then
+                task.spawn(function() forceState("Attacking") end)
+                guardSwitch.inGuard = false
+            end
+            return
+        end
+
+        local oppTop = getOppTopGS()
+        if not oppTop then return end
+
+        -- ── RPM Deficit check ─────────────────────────────────────────────────
+        local myPct   = getRPMPct(myTop)
+        local oppPct  = getRPMPct(oppTop)
+        local deficit = oppPct - myPct   -- positive = we are behind
+
+        if deficit > guardSwitch.rpmThreshold then
+            if not guardSwitch.disabledByRPM then
+                guardSwitch.disabledByRPM = true
+                if guardSwitch.inGuard then
+                    task.spawn(function() forceState("Attacking") end)
+                    guardSwitch.inGuard = false
+                end
+            end
+        else
+            if guardSwitch.disabledByRPM then
+                guardSwitch.disabledByRPM = false
+            end
+        end
+
+        if guardSwitch.disabledByRPM then return end
+        if guardSwitch.isSwitching   then return end
+
+        -- ── Interval gate ─────────────────────────────────────────────────────
+        -- Must be at least switchInterval seconds since the last cycle started.
+        local now = tick()
+        if (now - guardSwitch.lastCycleTime) < guardSwitch.switchInterval then return end
+
+        -- ── Approach check ────────────────────────────────────────────────────
+        -- Only fire when beys are genuinely closing in on each other.
+        local aboutToCollide = checkApproach(myTop, oppTop)
+        if not aboutToCollide then return end
+
+        -- ── Fire the correct cycle ────────────────────────────────────────────
+        if guardSwitch.mode == "Smash" then
+            doSmashCycle()
+        else
+            doBarrageCycle()
+        end
+    end)
+end
+
+-- ── UI ────────────────────────────────────────────────────────────────────────
+
+Main1v1:AddToggle('AutoGuardSwitch', {
+    Text     = 'Auto Guard-Switch',
+    Default  = false,
+    Callback = function(value)
+        guardSwitch.enabled = value
+        if value then startGuardSwitch() else stopGuardSwitch() end
+    end,
+})
+
+Main1v1:AddDropdown('GuardSwitchMode', {
+    Text     = 'Switch Mode',
+    Values   = { 'Barrage', 'Smash' },
+    Default  = 1,
+    Callback = function(value)
+        guardSwitch.mode = value
+    end,
+})
+
+Main1v1:AddSlider('GuardSwitchRPMThreshold', {
+    Text     = 'RPM Deficit Threshold',
+    Min      = 0,
+    Max      = 110,
+    Default  = 110,
+    Rounding = 0,
+    Suffix   = '%',
+    Callback = function(value)
+        guardSwitch.rpmThreshold = value / 100
+    end,
+})
+
+Main1v1:AddSlider('GuardSwitchInterval', {
+    Text     = 'Switch Interval',
+    Min      = 1,
+    Max      = 50,
+    Default  = 30,   -- 3.0s default (value / 10)
+    Rounding = 0,
+    Suffix   = 's',
+    Callback = function(value)
+        guardSwitch.switchInterval = value / 10
+    end,
+})
+
+end -- guard switching do block
+
 -- ── ESP TAB ───────────────────────────────────────────────────────────────────
 local ESPLeft   = Tabs.ESP:AddLeftGroupbox('ESP')
 local ESPViewer = Tabs.ESP:AddRightGroupbox('Top Inspector Viewer')
@@ -2581,6 +2923,8 @@ end -- NPC ESP do block
 -- Trash ESP
 local function createTrashESP(part)
     if trashESP.bbCache[part] then return end
+    -- skip gold trash — gold trash ESP handles those separately
+    if part:FindFirstChild("Golden") then return end
     local prompt=part:FindFirstChild("Prompt") if not prompt then return end
     local oldHL=part:FindFirstChild("TrashESPHighlight") if oldHL then oldHL:Destroy() end
     local highlight=Instance.new("Highlight")
@@ -2589,12 +2933,14 @@ local function createTrashESP(part)
     highlight.OutlineTransparency=0 highlight.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
     highlight.Adornee=part highlight.Parent=part highlight.Enabled=prompt.Enabled
     local bb=Instance.new("BillboardGui")
-    bb.Name="TrashESP" bb.AlwaysOnTop=true bb.Size=UDim2.new(0,130,0,40)
+    bb.Name="TrashESP" bb.AlwaysOnTop=true bb.Size=UDim2.new(0,110,0,34)
     bb.StudsOffset=Vector3.new(0,3,0) bb.Adornee=part bb.Parent=workspace bb.Enabled=prompt.Enabled
     trashESP.bbCache[part]={bb=bb,highlight=highlight}
     local label=Instance.new("TextLabel")
     label.BackgroundTransparency=1 label.Size=UDim2.new(1,0,1,0) label.Font=Enum.Font.GothamBold
-    label.TextSize=14 label.TextColor3=Color3.fromRGB(180,180,180) label.Text="🗑️ Trash" label.Parent=bb
+    label.TextSize=11 label.TextColor3=Color3.fromRGB(180,180,180)
+    label.TextStrokeTransparency=0 label.TextStrokeColor3=Color3.fromRGB(0,0,0)
+    label.Text="🗑️ Trash" label.Parent=bb
     local heartbeatConn=RunService.Heartbeat:Connect(function()
         if not trashESP.enabled or not part or not part.Parent then return end
         local char=LocalPlayer.Character local hrp=char and char:FindFirstChild("HumanoidRootPart")
@@ -2624,6 +2970,18 @@ local function isGoldTrash(part) return part:FindFirstChild("Golden")~=nil end
 local function createGoldTrashESP(part)
     if goldTrashESP.bbCache[part] then return end
     local prompt=part:FindFirstChild("Prompt") if not prompt then return end
+    -- remove any normal trash ESP on this part to avoid overlap
+    local oldTrashHL=part:FindFirstChild("TrashESPHighlight") if oldTrashHL then oldTrashHL:Destroy() end
+    if trashESP.bbCache[part] then
+        pcall(function() trashESP.bbCache[part].bb:Destroy() end)
+        pcall(function() trashESP.bbCache[part].highlight:Destroy() end)
+        if trashESP.promptConns[part] then
+            pcall(function() trashESP.promptConns[part].heartbeat:Disconnect() end)
+            pcall(function() trashESP.promptConns[part].prompt:Disconnect() end)
+            trashESP.promptConns[part]=nil
+        end
+        trashESP.bbCache[part]=nil
+    end
     local oldHL=part:FindFirstChild("GoldTrashESPHighlight") if oldHL then oldHL:Destroy() end
     local highlight=Instance.new("Highlight")
     highlight.Name="GoldTrashESPHighlight" highlight.FillColor=Color3.fromRGB(255,215,0)
@@ -2631,12 +2989,14 @@ local function createGoldTrashESP(part)
     highlight.OutlineTransparency=0 highlight.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
     highlight.Adornee=part highlight.Parent=part highlight.Enabled=prompt.Enabled
     local bb=Instance.new("BillboardGui")
-    bb.Name="GoldTrashESP" bb.AlwaysOnTop=true bb.Size=UDim2.new(0,130,0,40)
+    bb.Name="GoldTrashESP" bb.AlwaysOnTop=true bb.Size=UDim2.new(0,130,0,38)
     bb.StudsOffset=Vector3.new(0,3,0) bb.Adornee=part bb.Parent=workspace bb.Enabled=prompt.Enabled
     goldTrashESP.bbCache[part]={bb=bb,highlight=highlight}
     local label=Instance.new("TextLabel")
     label.BackgroundTransparency=1 label.Size=UDim2.new(1,0,1,0) label.Font=Enum.Font.GothamBold
-    label.TextSize=14 label.TextColor3=Color3.fromRGB(255,215,0) label.Text="💰 Gold Trash" label.Parent=bb
+    label.TextSize=13 label.TextColor3=Color3.fromRGB(255,215,0)
+    label.TextStrokeTransparency=0 label.TextStrokeColor3=Color3.fromRGB(0,0,0)
+    label.Text="💰 Gold Trash" label.Parent=bb
     local heartbeatConn=RunService.Heartbeat:Connect(function()
         if not goldTrashESP.enabled or not part or not part.Parent then return end
         local char=LocalPlayer.Character local hrp=char and char:FindFirstChild("HumanoidRootPart")
@@ -2657,8 +3017,26 @@ local function clearGoldTrashESP()
 end
 local function onGoldTrashESP(value)
     toggleStates.GoldTrashESP=value goldTrashESP.enabled=value
-    if value then for _,part in ipairs(workspace.Map.Environment.Trash:GetChildren()) do if isGoldTrash(part) then createGoldTrashESP(part) end end
-    else clearGoldTrashESP() end
+    if value then
+        for _,part in ipairs(workspace.Map.Environment.Trash:GetChildren()) do
+            if isGoldTrash(part) then createGoldTrashESP(part) end
+        end
+        -- watch for new gold trash spawning
+        if not goldTrashESP._addedConn then
+            goldTrashESP._addedConn=workspace.Map.Environment.Trash.ChildAdded:Connect(function(part)
+                if not goldTrashESP.enabled then return end
+                if isGoldTrash(part) then
+                    task.wait(0.1) createGoldTrashESP(part)
+                end
+            end)
+        end
+    else
+        clearGoldTrashESP()
+        if goldTrashESP._addedConn then
+            goldTrashESP._addedConn:Disconnect()
+            goldTrashESP._addedConn=nil
+        end
+    end
 end
 toggleCallbacks["GoldTrashESP"]=onGoldTrashESP
 ESPLeft:AddToggle('GoldTrashESP',{Text='Gold Trash ESP',Default=startFlags.GoldTrashESP,Callback=onGoldTrashESP})
@@ -2672,7 +3050,7 @@ local function createDumpsterESP(part)
     local highlight=Instance.new("Highlight")
     highlight.Name="DumpsterESPHighlight" highlight.FillColor=Color3.fromRGB(0,200,80)
     highlight.OutlineColor=Color3.fromRGB(0,200,80) highlight.FillTransparency=0.3
-    highlight.OutlineTransparency=0 highlight.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.OutlineTransparency=100 highlight.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
     highlight.Adornee=part highlight.Parent=part
     local bb=Instance.new("BillboardGui")
     bb.Name="DumpsterESP" bb.AlwaysOnTop=true bb.Size=UDim2.new(0,150,0,40)
@@ -3820,6 +4198,100 @@ end
 toggleCallbacks["AntiAFK"]=onAntiAFK
 MiscLeft:AddToggle('AntiAFK',{Text='Anti AFK',Default=startFlags.AntiAFK,Callback=onAntiAFK})
 if startFlags.AntiAFK then onAntiAFK(true) end
+
+-- ── Instant Interact ──────────────────────────────────────────────────────────
+
+do
+local instantInteract = {
+    enabled = false,
+    conn    = nil,
+    RANGE   = 10,        -- studs — prompt fires when trash is within this distance
+    MOVING_THRESHOLD = 0.5,  -- studs/s below this = considered standing still
+}
+
+local lastPos     = nil
+local lastPosTime = 0
+
+local function isMoving()
+    local char = LocalPlayer.Character
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    local now = tick()
+    local pos = hrp.Position
+    if lastPos and (now - lastPosTime) > 0 then
+        local speed = (pos - lastPos).Magnitude / (now - lastPosTime)
+        lastPos     = pos
+        lastPosTime = now
+        return speed >= instantInteract.MOVING_THRESHOLD
+    end
+    lastPos     = pos
+    lastPosTime = now
+    return false
+end
+
+local function isTrashPart(part)
+    -- must be in the Trash folder
+    local parent = part.Parent
+    if not parent then return false end
+    return parent == workspace.Map.Environment.Trash
+end
+
+local function isGoldTrashPart(part)
+    return isTrashPart(part) and part:FindFirstChild("Golden") ~= nil
+end
+
+local function startInstantInteract()
+    if instantInteract.conn then
+        instantInteract.conn:Disconnect()
+        instantInteract.conn = nil
+    end
+    lastPos     = nil
+    lastPosTime = 0
+
+    instantInteract.conn = RunService.Heartbeat:Connect(function()
+        if not instantInteract.enabled then return end
+        if not isMoving() then return end
+
+        local char = LocalPlayer.Character
+        local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+
+        local hrpPos = hrp.Position
+
+        for _, part in ipairs(workspace.Map.Environment.Trash:GetChildren()) do
+            -- only trash and gold trash
+            if not isTrashPart(part) then continue end
+
+            local prompt = part:FindFirstChild("Prompt")
+            if not prompt or not prompt.Enabled then continue end
+
+            local dist = (hrpPos - part.Position).Magnitude
+            if dist <= instantInteract.RANGE then
+                fireproximityprompt(prompt)
+            end
+        end
+    end)
+end
+
+local function stopInstantInteract()
+    if instantInteract.conn then
+        instantInteract.conn:Disconnect()
+        instantInteract.conn = nil
+    end
+    lastPos     = nil
+    lastPosTime = 0
+end
+
+MiscLeft:AddToggle('InstantInteract', {
+    Text     = 'Instant Interact (Trash)',
+    Default  = false,
+    Callback = function(value)
+        instantInteract.enabled = value
+        if value then startInstantInteract() else stopInstantInteract() end
+    end,
+})
+
+end -- instant interact do block
 
 -- Mod Notifier
 do
