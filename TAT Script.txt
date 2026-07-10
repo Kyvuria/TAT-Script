@@ -3116,7 +3116,7 @@ local function buildViewerGui(playerName, top)
     viewer.gui=sg
     local frame=Instance.new("Frame")
     frame.BackgroundColor3=Color3.fromRGB(10,10,20) frame.BackgroundTransparency=0.15
-    frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,505)
+    frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,575)
     frame.Position=savedPos or UDim2.new(1,-295,0.5,-230) frame.Parent=sg
     Instance.new("UICorner",frame).CornerRadius=UDim.new(0,8)
     local dragging,dragStart,startPos=false,nil,nil
@@ -3296,8 +3296,17 @@ local function buildViewerGui(playerName, top)
     elseif styleDisplay:lower():find("wobble") then styleColor=Color3.fromRGB(180,80,255)
     else styleColor=Color3.fromRGB(200,200,200) end
     makeRow("Style:",styleDisplay,Color3.fromRGB(160,160,180),styleColor,y) y+=22
-    makeDivider(y) y+=4
+    makeDivider(y) y+=8
 
+local stateAboveRPMRow=Instance.new("Frame") stateAboveRPMRow.BackgroundTransparency=1 stateAboveRPMRow.Size=UDim2.new(1,0,0,20) stateAboveRPMRow.Position=UDim2.new(0,0,0,y) stateAboveRPMRow.Parent=content
+    local stateAboveRPMKey=Instance.new("TextLabel") stateAboveRPMKey.BackgroundTransparency=1 stateAboveRPMKey.Size=UDim2.new(0.42,0,1,0) stateAboveRPMKey.Font=Enum.Font.GothamBold stateAboveRPMKey.TextSize=11 stateAboveRPMKey.TextColor3=Color3.fromRGB(160,160,180) stateAboveRPMKey.TextXAlignment=Enum.TextXAlignment.Left stateAboveRPMKey.Text="State:" stateAboveRPMKey.Parent=stateAboveRPMRow
+    local stateValLabel=Instance.new("TextLabel") stateValLabel.BackgroundTransparency=1 stateValLabel.Size=UDim2.new(0.58,0,1,0) stateValLabel.Position=UDim2.new(0.42,0,0,0) stateValLabel.Font=Enum.Font.GothamBold stateValLabel.TextSize=11 stateValLabel.TextColor3=Color3.fromRGB(200,200,200) stateValLabel.TextXAlignment=Enum.TextXAlignment.Left stateValLabel.Text="..." stateValLabel.Parent=stateAboveRPMRow
+    y+=22
+    makeDivider(y) y+=6
+    local drainRow=Instance.new("Frame") drainRow.BackgroundTransparency=1 drainRow.Size=UDim2.new(1,0,0,20) drainRow.Position=UDim2.new(0,0,0,y) drainRow.Parent=content
+    local drainKey=Instance.new("TextLabel") drainKey.BackgroundTransparency=1 drainKey.Size=UDim2.new(0.42,0,1,0) drainKey.Font=Enum.Font.GothamBold drainKey.TextSize=11 drainKey.TextColor3=Color3.fromRGB(160,160,180) drainKey.TextXAlignment=Enum.TextXAlignment.Left drainKey.TextStrokeTransparency=0.5 drainKey.TextStrokeColor3=Color3.fromRGB(0,0,0) drainKey.Text="Tick Drain:" drainKey.Parent=drainRow
+    local drainLabel=Instance.new("TextLabel") drainLabel.BackgroundTransparency=1 drainLabel.Size=UDim2.new(0.58,0,1,0) drainLabel.Position=UDim2.new(0.42,0,0,0) drainLabel.Font=Enum.Font.GothamBold drainLabel.TextSize=11 drainLabel.TextColor3=Color3.fromRGB(255,140,0) drainLabel.TextXAlignment=Enum.TextXAlignment.Left drainLabel.TextStrokeTransparency=0.5 drainLabel.TextStrokeColor3=Color3.fromRGB(0,0,0) drainLabel.Text="..." drainLabel.Parent=drainRow
+    y+=22
     local rpmLabel=Instance.new("TextLabel") rpmLabel.BackgroundTransparency=1 rpmLabel.Size=UDim2.new(0.32,0,0,18) rpmLabel.Position=UDim2.new(0,0,0,y) rpmLabel.Font=Enum.Font.GothamBold rpmLabel.TextSize=11 rpmLabel.TextColor3=Color3.fromRGB(160,160,180) rpmLabel.TextXAlignment=Enum.TextXAlignment.Left rpmLabel.Text="RPM:" rpmLabel.Parent=content
     local rpmValLabel=Instance.new("TextLabel") rpmValLabel.BackgroundTransparency=1 rpmValLabel.Size=UDim2.new(0.38,0,0,18) rpmValLabel.Position=UDim2.new(0.32,0,0,y) rpmValLabel.Font=Enum.Font.GothamBold rpmValLabel.TextSize=11 rpmValLabel.TextColor3=Color3.fromRGB(0,200,255) rpmValLabel.TextXAlignment=Enum.TextXAlignment.Left rpmValLabel.Text="..." rpmValLabel.Parent=content
     local rpmPctLabel=Instance.new("TextLabel") rpmPctLabel.BackgroundTransparency=1 rpmPctLabel.Size=UDim2.new(0.3,0,0,18) rpmPctLabel.Position=UDim2.new(0.7,0,0,y) rpmPctLabel.Font=Enum.Font.GothamBold rpmPctLabel.TextSize=13 rpmPctLabel.TextColor3=Color3.fromRGB(0,200,255) rpmPctLabel.TextXAlignment=Enum.TextXAlignment.Right rpmPctLabel.Text="..." rpmPctLabel.Parent=content
@@ -3308,11 +3317,32 @@ local function buildViewerGui(playerName, top)
     Instance.new("UICorner",rpmBarFill).CornerRadius=UDim.new(0,3)
     y+=20
     makeDivider(y) y+=6
-    local stateRow2=Instance.new("Frame") stateRow2.BackgroundTransparency=1 stateRow2.Size=UDim2.new(1,0,0,32) stateRow2.Position=UDim2.new(0,0,0,y) stateRow2.Parent=content
-    local stateKeyLabel=Instance.new("TextLabel") stateKeyLabel.BackgroundTransparency=1 stateKeyLabel.Size=UDim2.new(0.42,0,1,0) stateKeyLabel.Font=Enum.Font.GothamBold stateKeyLabel.TextSize=11 stateKeyLabel.TextColor3=Color3.fromRGB(160,160,180) stateKeyLabel.TextXAlignment=Enum.TextXAlignment.Left stateKeyLabel.Text="State:" stateKeyLabel.Parent=stateRow2
-    local stateValLabel=Instance.new("TextLabel") stateValLabel.BackgroundTransparency=1 stateValLabel.Size=UDim2.new(0.58,0,1,0) stateValLabel.Position=UDim2.new(0.42,0,0,0) stateValLabel.Font=Enum.Font.GothamBold stateValLabel.TextSize=11 stateValLabel.TextColor3=Color3.fromRGB(200,200,200) stateValLabel.TextXAlignment=Enum.TextXAlignment.Left stateValLabel.TextWrapped=true stateValLabel.Text="..." stateValLabel.Parent=stateRow2
-    y+=34
-    local divStatusViewer=Instance.new("Frame") divStatusViewer.BackgroundColor3=Color3.fromRGB(60,60,80) divStatusViewer.BackgroundTransparency=0.3 divStatusViewer.BorderSizePixel=0 divStatusViewer.Size=UDim2.new(1,0,0,1) divStatusViewer.Position=UDim2.new(0,0,0,y) divStatusViewer.Parent=content y+=5
+local divStatusViewer=Instance.new("Frame") divStatusViewer.BackgroundColor3=Color3.fromRGB(60,60,80) divStatusViewer.BackgroundTransparency=0.3 divStatusViewer.BorderSizePixel=0 divStatusViewer.Size=UDim2.new(1,0,0,1) divStatusViewer.Position=UDim2.new(0,0,0,y) divStatusViewer.Parent=content y+=5
+
+    -- ── Opponent Rage Bar ──────────────────────────────────────────────────
+    local MAX_RAGE_OPP = 5000
+    local oppRageValLabel=Instance.new("TextLabel")
+    oppRageValLabel.BackgroundTransparency=1 oppRageValLabel.Size=UDim2.new(0.65,0,0,18)
+    oppRageValLabel.Position=UDim2.new(0,0,0,y) oppRageValLabel.Font=Enum.Font.GothamBold
+    oppRageValLabel.TextSize=11 oppRageValLabel.TextColor3=Color3.fromRGB(255,60,60)
+    oppRageValLabel.TextXAlignment=Enum.TextXAlignment.Left oppRageValLabel.Text="Rage: ..." oppRageValLabel.Parent=content
+    local oppRagePctLabel=Instance.new("TextLabel")
+    oppRagePctLabel.BackgroundTransparency=1 oppRagePctLabel.Size=UDim2.new(0.35,0,0,18)
+    oppRagePctLabel.Position=UDim2.new(0.65,0,0,y) oppRagePctLabel.Font=Enum.Font.GothamBold
+    oppRagePctLabel.TextSize=13 oppRagePctLabel.TextColor3=Color3.fromRGB(255,60,60)
+    oppRagePctLabel.TextXAlignment=Enum.TextXAlignment.Right oppRagePctLabel.Text="..." oppRagePctLabel.Parent=content
+    y+=20
+    local oppRageBarBG=Instance.new("Frame")
+    oppRageBarBG.BackgroundColor3=Color3.fromRGB(30,30,40) oppRageBarBG.BorderSizePixel=0
+    oppRageBarBG.Size=UDim2.new(1,0,0,14) oppRageBarBG.Position=UDim2.new(0,0,0,y) oppRageBarBG.Parent=content
+    Instance.new("UICorner",oppRageBarBG).CornerRadius=UDim.new(0,3)
+    local oppRageBarFill=Instance.new("Frame")
+    oppRageBarFill.BackgroundColor3=Color3.fromRGB(255,60,60) oppRageBarFill.BorderSizePixel=0
+    oppRageBarFill.Size=UDim2.new(0,0,1,0) oppRageBarFill.Parent=oppRageBarBG
+    Instance.new("UICorner",oppRageBarFill).CornerRadius=UDim.new(0,3)
+    y+=20
+    local rageDivOpp=Instance.new("Frame") rageDivOpp.BackgroundColor3=Color3.fromRGB(60,60,80) rageDivOpp.BackgroundTransparency=0.3 rageDivOpp.BorderSizePixel=0 rageDivOpp.Size=UDim2.new(1,0,0,1) rageDivOpp.Position=UDim2.new(0,0,0,y) rageDivOpp.Parent=content y+=5
+    -- ─────────────────────────────────────────────────────────────────────
     local matchStatusRow=Instance.new("Frame") matchStatusRow.BackgroundTransparency=1 matchStatusRow.Size=UDim2.new(1,0,0,32) matchStatusRow.Position=UDim2.new(0,0,0,y) matchStatusRow.Parent=content
     local matchStatusKey=Instance.new("TextLabel") matchStatusKey.BackgroundTransparency=1 matchStatusKey.Size=UDim2.new(0.42,0,1,0) matchStatusKey.Font=Enum.Font.GothamBold matchStatusKey.TextSize=11 matchStatusKey.TextColor3=Color3.fromRGB(160,160,180) matchStatusKey.TextXAlignment=Enum.TextXAlignment.Left matchStatusKey.Text="Status:" matchStatusKey.Parent=matchStatusRow
     local matchStatusLabel=Instance.new("TextLabel") matchStatusLabel.Name="MatchStatus" matchStatusLabel.BackgroundTransparency=1 matchStatusLabel.Size=UDim2.new(0.58,0,1,0) matchStatusLabel.Position=UDim2.new(0.42,0,0,0) matchStatusLabel.Font=Enum.Font.GothamBold matchStatusLabel.TextSize=11 matchStatusLabel.TextColor3=Color3.fromRGB(200,200,200) matchStatusLabel.TextXAlignment=Enum.TextXAlignment.Left matchStatusLabel.Text="Waiting..." matchStatusLabel.Parent=matchStatusRow
@@ -3401,8 +3431,63 @@ local function buildViewerGui(playerName, top)
         rpmPctLabel.Text=displayPct rpmPctLabel.TextColor3=isSpinning and barColor or Color3.fromRGB(150,150,150)
         rpmBarFill.BackgroundColor3=isSpinning and barColor or Color3.fromRGB(100,100,100)
         rpmBarFill.Size=UDim2.new(pct,0,1,0)
-        local displayState=(state~="" and state or "Idle")
+        -- ── Opponent rage update ───────────────────────────────────────────
+        do
+            local uid = tonumber(top.Name)
+            local oppPlayer = uid and Players:GetPlayerByUserId(uid)
+            local oppRage = oppPlayer and oppPlayer:GetAttribute("Rage")
+            if oppRage == nil then
+                oppRageValLabel.Text = "Rage Not Unlocked"
+                oppRageValLabel.TextColor3 = Color3.fromRGB(120,120,140)
+                oppRagePctLabel.Text = ""
+                oppRageBarFill.Size = UDim2.new(0,0,1,0)
+                oppRageBarFill.BackgroundColor3 = Color3.fromRGB(60,60,60)
+            else
+                local clampedRage = math.clamp(oppRage, 0, MAX_RAGE_OPP)
+                local ragePct = clampedRage / MAX_RAGE_OPP
+                local rageIsMax = clampedRage >= MAX_RAGE_OPP
+                oppRageValLabel.Text = "Rage: " .. math.floor(clampedRage) .. " / " .. MAX_RAGE_OPP
+if rageIsMax then
+                    oppRagePctLabel.Text = "READY!"
+                else
+                    oppRagePctLabel.Text = math.floor(ragePct * 100) .. "%"
+                end
+                oppRagePctLabel.TextColor3 = Color3.fromRGB(255,60,60)
+                oppRageValLabel.TextColor3 = Color3.fromRGB(255,60,60)
+                oppRageBarFill.BackgroundColor3 = Color3.fromRGB(255,60,60)
+                oppRageBarFill.Size = UDim2.new(ragePct, 0, 1, 0)
+            end
+        end
+        -- ──────────────────────────────────────────────────────────────────
+
+local displayState=(state~="" and state or "Idle")
         stateValLabel.Text=displayState stateValLabel.TextColor3=STATE_COLORS[state] or Color3.fromRGB(200,200,200)
+do
+            if not viewer._drainTrack then viewer._drainTrack={lastRPM=nil,tickDrop=nil} end
+            local dt2 = viewer._drainTrack
+            if isSpinning and currentRPM and currentRPM > 0 then
+                if dt2.lastRPM and dt2.lastRPM ~= currentRPM then
+                    local drop = dt2.lastRPM - currentRPM
+                    if drop > 0 then
+                        dt2.tickDrop = drop
+                    end
+                end
+                dt2.lastRPM = currentRPM
+if dt2.tickDrop then
+                    drainLabel.Text = dt2.tickDrop .. " RPM"
+                    drainLabel.TextColor3 = dt2.tickDrop >= 20 and Color3.fromRGB(255,60,60) or dt2.tickDrop >= 10 and Color3.fromRGB(255,140,0) or Color3.fromRGB(100,220,100)
+                else
+                    drainLabel.Text = "..."
+                    drainLabel.TextColor3 = Color3.fromRGB(160,160,180)
+                end
+            else
+                if not isSpinning then
+                    viewer._drainTrack = {lastRPM=nil,tickDrop=nil}
+                    drainLabel.Text = "—"
+                    drainLabel.TextColor3 = Color3.fromRGB(120,120,140)
+                end
+            end
+        end
 -- Match status calculation
         do
             local myId=tostring(LocalPlayer.UserId)
@@ -3792,8 +3877,8 @@ local function buildOwnRpmGui()
     viewer.ownRpmGui=sg
     local frame=Instance.new("Frame")
     frame.BackgroundColor3=Color3.fromRGB(10,10,20) frame.BackgroundTransparency=0.15
-    frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,130)
-    frame.Position=UDim2.new(1,-295,0.5,285) frame.Parent=sg
+    frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,130) -- expanded from 130 to 185 to fit rage bar
+    frame.Position=UDim2.new(1,-295,0.5,350) frame.Parent=sg
     Instance.new("UICorner",frame).CornerRadius=UDim.new(0,8)
     local dragging,dragStart,startPos=false,nil,nil
     local dragHandle=Instance.new("TextButton")
@@ -3825,6 +3910,8 @@ local function buildOwnRpmGui()
     local content=Instance.new("Frame")
     content.BackgroundTransparency=1 content.Size=UDim2.new(1,-16,1,-34)
     content.Position=UDim2.new(0,8,0,32) content.Parent=frame
+
+    -- RPM value + pct row
     local rpmValLabel=Instance.new("TextLabel")
     rpmValLabel.BackgroundTransparency=1 rpmValLabel.Size=UDim2.new(0.5,0,0,18)
     rpmValLabel.Position=UDim2.new(0,0,0,0) rpmValLabel.Font=Enum.Font.GothamBold
@@ -3835,6 +3922,8 @@ local function buildOwnRpmGui()
     rpmPctLabel.Position=UDim2.new(0.5,0,0,0) rpmPctLabel.Font=Enum.Font.GothamBold
     rpmPctLabel.TextSize=14 rpmPctLabel.TextColor3=Color3.fromRGB(0,200,255)
     rpmPctLabel.TextXAlignment=Enum.TextXAlignment.Right rpmPctLabel.Text="..." rpmPctLabel.Parent=content
+
+    -- RPM bar
     local rpmBarBG=Instance.new("Frame")
     rpmBarBG.BackgroundColor3=Color3.fromRGB(30,30,40) rpmBarBG.BorderSizePixel=0
     rpmBarBG.Size=UDim2.new(1,0,0,16) rpmBarBG.Position=UDim2.new(0,0,0,22) rpmBarBG.Parent=content
@@ -3843,17 +3932,23 @@ local function buildOwnRpmGui()
     rpmBarFill.BackgroundColor3=Color3.fromRGB(0,200,255) rpmBarFill.BorderSizePixel=0
     rpmBarFill.Size=UDim2.new(0,0,1,0) rpmBarFill.Parent=rpmBarBG
     Instance.new("UICorner",rpmBarFill).CornerRadius=UDim.new(0,3)
+
+    -- State label
     local stateLabel=Instance.new("TextLabel")
     stateLabel.BackgroundTransparency=1 stateLabel.Size=UDim2.new(1,0,0,18)
     stateLabel.Position=UDim2.new(0,0,0,44) stateLabel.Font=Enum.Font.GothamBold
     stateLabel.TextSize=12 stateLabel.TextColor3=Color3.fromRGB(200,200,200)
     stateLabel.TextXAlignment=Enum.TextXAlignment.Center stateLabel.Text="State: Idle" stateLabel.Parent=content
+
+    -- Divider + status
     local ownDivider=Instance.new("Frame") ownDivider.BackgroundColor3=Color3.fromRGB(60,60,80) ownDivider.BackgroundTransparency=0.3 ownDivider.BorderSizePixel=0 ownDivider.Size=UDim2.new(1,0,0,1) ownDivider.Position=UDim2.new(0,0,0,68) ownDivider.Parent=content
     local ownStatusLabel=Instance.new("TextLabel") ownStatusLabel.BackgroundTransparency=1 ownStatusLabel.Size=UDim2.new(1,0,0,18) ownStatusLabel.Position=UDim2.new(0,0,0,72) ownStatusLabel.Font=Enum.Font.GothamBold ownStatusLabel.TextSize=12 ownStatusLabel.TextColor3=Color3.fromRGB(150,150,150) ownStatusLabel.TextXAlignment=Enum.TextXAlignment.Center ownStatusLabel.Text="Status: Waiting..." ownStatusLabel.Parent=content
 
     local lastKnownRPM=0 local zeroFrames=0 local ZERO_THRESH=8 local updateInterval=0
     viewer.ownRpmConn=RunService.Heartbeat:Connect(function(dt)
         updateInterval+=dt if updateInterval<0.1 then return end updateInterval=0
+
+        -- ── RPM update (unchanged from original) ──────────────────────────
         local myTop=workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
         if not myTop then
             rpmBarFill.Size=UDim2.new(0,0,1,0) rpmBarFill.BackgroundColor3=Color3.fromRGB(100,100,100)
