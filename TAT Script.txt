@@ -3463,29 +3463,18 @@ if rageIsMax then
 local displayState=(state~="" and state or "Idle")
         stateValLabel.Text=displayState stateValLabel.TextColor3=STATE_COLORS[state] or Color3.fromRGB(200,200,200)
 do
-            if not viewer._drainTrack then viewer._drainTrack={lastRPM=nil,tickDrop=nil} end
-            local dt2 = viewer._drainTrack
-            if isSpinning and currentRPM and currentRPM > 0 then
-                if dt2.lastRPM and dt2.lastRPM ~= currentRPM then
-                    local drop = dt2.lastRPM - currentRPM
-                    if drop > 0 then
-                        dt2.tickDrop = drop
-                    end
-                end
-                dt2.lastRPM = currentRPM
-if dt2.tickDrop then
-                    drainLabel.Text = dt2.tickDrop .. " RPM"
-                    drainLabel.TextColor3 = dt2.tickDrop >= 20 and Color3.fromRGB(255,60,60) or dt2.tickDrop >= 10 and Color3.fromRGB(255,140,0) or Color3.fromRGB(100,220,100)
-                else
-                    drainLabel.Text = "..."
-                    drainLabel.TextColor3 = Color3.fromRGB(160,160,180)
-                end
+            local lastDrain = top:GetAttribute("LastDrain")
+            if isSpinning and lastDrain and lastDrain > 0 then
+                drainLabel.Text = lastDrain .. " RPM"
+                drainLabel.TextColor3 = lastDrain >= 20 and Color3.fromRGB(255,60,60)
+                    or lastDrain >= 10 and Color3.fromRGB(255,140,0)
+                    or Color3.fromRGB(100,220,100)
+            elseif isSpinning then
+                drainLabel.Text = "..."
+                drainLabel.TextColor3 = Color3.fromRGB(160,160,180)
             else
-                if not isSpinning then
-                    viewer._drainTrack = {lastRPM=nil,tickDrop=nil}
-                    drainLabel.Text = "—"
-                    drainLabel.TextColor3 = Color3.fromRGB(120,120,140)
-                end
+                drainLabel.Text = "—"
+                drainLabel.TextColor3 = Color3.fromRGB(120,120,140)
             end
         end
 -- Match status calculation
