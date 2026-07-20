@@ -2836,6 +2836,34 @@ ESPLeft:AddSlider('TopESPMaxDistance',{Text='Max Distance',Min=0,Max=10000,Defau
     end
     topInspector._maxDistance = value
 end})
+ESPLeft:AddSlider('TopESPScale',{Text='Billboard Size',Min=0,Max=100,Default=100,Rounding=0,Suffix='%',Callback=function(value)
+    topInspector.scale = value / 100
+    if not topInspector.enabled then return end
+    -- hide all first so there's no visible pop
+    for _, entry in pairs(topInspector.bbCache) do
+        pcall(function() entry.bb.Enabled = false end)
+    end
+    -- rebuild all at new scale
+    for top, entry in pairs(topInspector.bbCache) do
+        pcall(function() entry.rpmConn:Disconnect() end)
+        pcall(function() entry.bb:Destroy() end)
+        pcall(function() if entry.hl then entry.hl:Destroy() end end)
+        topInspector.bbCache[top] = nil
+        topInspector.buildLock[top] = nil
+    end
+    for _, top in ipairs(workspace.Tops:GetChildren()) do
+        task.spawn(buildTopBillboard, top)
+    end
+end})
+ESPLeft:AddSlider('TopESPOpacity',{Text='Billboard Opacity',Min=0,Max=100,Default=100,Rounding=0,Suffix='%',Callback=function(value)
+    topInspector._opacity = value / 100
+    for _, entry in pairs(topInspector.bbCache) do
+        pcall(function()
+            local bg = entry.bb:FindFirstChildWhichIsA("Frame")
+            if bg then bg.BackgroundTransparency = 1 - (value / 100) end
+        end)
+    end
+end})
 ESPLeft:AddToggle('HideOwnTop',{Text='Hide Own Top',Default=false,Callback=function(value)
     local myId=tostring(LocalPlayer.UserId)
     local myTop=workspace.Tops:FindFirstChild(myId)
@@ -3501,25 +3529,37 @@ do
                         if #viewer._drainMine>6 then table.remove(viewer._drainMine,1) end
                         if #viewer._drainOpp>6 then table.remove(viewer._drainOpp,1) end
                     end
-                    if #viewer._drainMine>=2 then
-                        local myDrainRate=(viewer._drainMine[1]-viewer._drainMine[#viewer._drainMine])/((#viewer._drainMine-1)*SAMPLE_INTERVAL)
-                        local oppDrainRate=(viewer._drainOpp[1]-viewer._drainOpp[#viewer._drainOpp])/((#viewer._drainOpp-1)*SAMPLE_INTERVAL)
-                        local myDrain=math.max(myDrainRate,0.0001)
-                        local oppDrain=math.max(oppDrainRate,0.0001)
-                        local myTimeLeft=myPct/myDrain
-                        local oppTimeLeft=oppPct/oppDrain
-                        local myScore = myPct * 0.4 + (myTimeLeft / math.max(myTimeLeft + oppTimeLeft, 0.001)) * 0.6
-                        local oppScore = oppPct * 0.4 + (oppTimeLeft / math.max(myTimeLeft + oppTimeLeft, 0.001)) * 0.6
-                        local diff = myScore - oppScore
-                        if math.abs(diff) <= 0.04 then
-                            statusText="Even" statusColor=Color3.fromRGB(200,200,200)
-                        elseif diff > 0 then
-                            statusText="Winning" statusColor=Color3.fromRGB(100,255,100)
+                    do
+                        local myId2 = tostring(LocalPlayer.UserId)
+                        local myTop3 = workspace.Tops:FindFirstChild(myId2)
+                        local myDrain = myTop3 and tonumber(myTop3:GetAttribute("LastDrain")) or nil
+                        local oppDrain = tonumber(top:GetAttribute("LastDrain")) or nil
+
+                        if myDrain and oppDrain and myDrain > 0 and oppDrain > 0 then
+                            local myHealth2 = myTop3 and (myTop3:GetAttribute("Health") or 0) or 0
+                            local myMaxHealth2 = myTop3 and (myTop3:GetAttribute("MaxHealth") or 1) or 1
+                            local oppHealth2 = top:GetAttribute("Health") or 0
+                            local oppMaxHealth2 = top:GetAttribute("MaxHealth") or 1
+
+                            -- convert drain from RPM units to health units (health = rpm / 20)
+                            local myDrainPerTick = myDrain / 20
+                            local oppDrainPerTick = oppDrain / 20
+
+                            local myTicksLeft = myHealth2 / math.max(myDrainPerTick, 0.001)
+                            local oppTicksLeft = oppHealth2 / math.max(oppDrainPerTick, 0.001)
+
+                            local diff = myTicksLeft - oppTicksLeft
+                            -- even threshold: within 5 seconds of ticks
+                            if math.abs(diff) <= 5 then
+                                statusText = "Even" statusColor = Color3.fromRGB(200,200,200)
+                            elseif diff > 0 then
+                                statusText = "Winning" statusColor = Color3.fromRGB(100,255,100)
+                            else
+                                statusText = "Losing" statusColor = Color3.fromRGB(255,60,60)
+                            end
                         else
-                            statusText="Losing" statusColor=Color3.fromRGB(255,60,60)
+                            statusText = "Waiting..."
                         end
-                    else
-                        statusText="Waiting..."
                     end
                     viewer._myMatchStatus=statusText=="Winning" and "Winning" or statusText=="Losing" and "Losing" or "Even"
                     viewer._myMatchStatusColor=statusColor
