@@ -109,7 +109,7 @@ local meteorESP  = {
 local trashESP     = { enabled=false, bbCache={}, promptConns={} }
 local goldTrashESP = { enabled=false, bbCache={}, promptConns={} }
 local dumpsterESP  = { enabled=false, cache={} }
-local topInspector = { enabled=false, conns={}, bbCache={}, buildLock={}, scale=1.0, opacity=1.0 }
+local topInspector = { enabled=false, conns={}, bbCache={}, buildLock={}, scale=1.0 }
 local acBypassGui  = nil
 local viewer = { selectedPlayer=nil, liveConn=nil, gui=nil, autoEnabled=false, autoConn=nil, currentTop=nil, ownRpmGui=nil, ownRpmConn=nil }
 local previousTopSnapshots = {} -- stores {playerName -> snapshot table}
@@ -2070,73 +2070,36 @@ local ESPViewer = Tabs.ESP:AddRightGroupbox('Top Inspector Viewer')
 
 -- Player ESP
 local function removePlayerESP(player)
-    if playerESP.highlights[player] then
-        pcall(function() playerESP.highlights[player]:Destroy() end)
-        playerESP.highlights[player]=nil
-    end
-    local char=player.Character
-    if char then
-        local old=char:FindFirstChild("PlayerESPHighlight") if old then old:Destroy() end
-        local hrp=char:FindFirstChild("HumanoidRootPart")
+    if playerESP.highlights[player] then playerESP.highlights[player]:Destroy() playerESP.highlights[player]=nil end
+    if player.Character then
+        local hrp=player.Character:FindFirstChild("HumanoidRootPart")
         if hrp then local bb=hrp:FindFirstChild("PlayerESPBB") if bb then bb:Destroy() end end
     end
 end
 local function applyPlayerESP(player)
     if player==LocalPlayer then return end
     local char=player.Character if not char then return end
-    -- wait for HRP
     local hrp=char:FindFirstChild("HumanoidRootPart")
     if not hrp then
-        local deadline=tick()+4
+        local deadline=tick()+3
         repeat task.wait(0.1) hrp=char:FindFirstChild("HumanoidRootPart") until hrp or tick()>deadline
     end
-    if not hrp or not hrp.Parent then return end
-    -- clean up old
-    local oldHL=char:FindFirstChild("PlayerESPHighlight") if oldHL then oldHL:Destroy() end
+    if not hrp then return end
+    local old=char:FindFirstChild("PlayerESPHighlight") if old then old:Destroy() end
     if playerESP.highlights[player] then pcall(function() playerESP.highlights[player]:Destroy() end) playerESP.highlights[player]=nil end
     local oldBB=hrp:FindFirstChild("PlayerESPBB") if oldBB then oldBB:Destroy() end
-    -- cham: red fill, white outline
     local highlight=Instance.new("Highlight")
-    highlight.Name="PlayerESPHighlight"
-    highlight.FillColor=Color3.fromRGB(220,40,40)
-    highlight.OutlineColor=Color3.fromRGB(240,240,240)
-    highlight.FillTransparency=0.35
-    highlight.OutlineTransparency=0
-    highlight.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
-    highlight.Adornee=char
-    highlight.Parent=char
-    playerESP.highlights[player]=highlight
-    -- billboard
+    highlight.Name="PlayerESPHighlight" highlight.FillColor=Color3.fromRGB(255,0,0)
+    highlight.OutlineColor=Color3.fromRGB(255,0,0) highlight.FillTransparency=0.3
+    highlight.OutlineTransparency=0 highlight.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Adornee=char highlight.Parent=char playerESP.highlights[player]=highlight
     local bb=Instance.new("BillboardGui")
-    bb.Name="PlayerESPBB" bb.AlwaysOnTop=true
-    bb.Size=UDim2.new(0,160,0,36)
-    bb.StudsOffset=Vector3.new(0,4,0)
-    bb.MaxDistance=999999
-    bb.Adornee=hrp bb.Parent=hrp
-    -- display name label
-    local nameLabel=Instance.new("TextLabel")
-    nameLabel.BackgroundTransparency=1
-    nameLabel.Size=UDim2.new(1,0,0,18)
-    nameLabel.Position=UDim2.new(0,0,0,0)
-    nameLabel.Font=Enum.Font.GothamBold
-    nameLabel.TextSize=12
-    nameLabel.TextColor3=Color3.fromRGB(255,255,255)
-    nameLabel.TextStrokeTransparency=0
-    nameLabel.TextStrokeColor3=Color3.fromRGB(0,0,0)
-    nameLabel.Text=player.DisplayName
-    nameLabel.Parent=bb
-    -- username label — sits immediately below display name
-    local userLabel=Instance.new("TextLabel")
-    userLabel.BackgroundTransparency=1
-    userLabel.Size=UDim2.new(1,0,0,16)
-    userLabel.Position=UDim2.new(0,0,0,18)
-    userLabel.Font=Enum.Font.GothamBold
-    userLabel.TextSize=11
-    userLabel.TextColor3=Color3.fromRGB(185,185,185)
-    userLabel.TextStrokeTransparency=0
-    userLabel.TextStrokeColor3=Color3.fromRGB(0,0,0)
-    userLabel.Text="@"..player.Name
-    userLabel.Parent=bb
+    bb.Name="PlayerESPBB" bb.AlwaysOnTop=true bb.Size=UDim2.new(0,150,0,50)
+    bb.StudsOffset=Vector3.new(0,3.5,0) bb.Adornee=hrp bb.Parent=hrp
+    local label=Instance.new("TextLabel")
+    label.BackgroundTransparency=1 label.Size=UDim2.new(1,0,1,0) label.Font=Enum.Font.GothamBold
+    label.TextSize=11 label.TextColor3=Color3.fromRGB(255,80,80) label.TextStrokeTransparency=0
+    label.TextStrokeColor3=Color3.fromRGB(0,0,0) label.Text=player.DisplayName.."\n(@"..player.Name..")" label.Parent=bb
 end
 local function setupPlayerESP(player)
     if player==LocalPlayer then return end
@@ -2608,22 +2571,17 @@ local function createMeteorESP(meteor)
     if core:FindFirstChild("MeteorESP") then return end
     local oldHL=meteor:FindFirstChild("MeteorESPHighlight") if oldHL then oldHL:Destroy() end
     local highlight=Instance.new("Highlight")
-    highlight.Name="MeteorESPHighlight"
-    highlight.FillColor=Color3.fromRGB(180,120,255)
-    highlight.OutlineColor=Color3.fromRGB(220,180,255)
-    highlight.FillTransparency=0.3
-    highlight.OutlineTransparency=0
-    highlight.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Name="MeteorESPHighlight" highlight.FillColor=Color3.fromRGB(180,120,255)
+    highlight.OutlineColor=Color3.fromRGB(180,120,255) highlight.FillTransparency=0.3
+    highlight.OutlineTransparency=0 highlight.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
     highlight.Adornee=meteor highlight.Parent=meteor
     local bb=Instance.new("BillboardGui")
-    bb.Name="MeteorESP" bb.AlwaysOnTop=true bb.Size=UDim2.new(0,130,0,42)
+    bb.Name="MeteorESP" bb.AlwaysOnTop=true bb.Size=UDim2.new(0,120,0,40)
     bb.StudsOffset=Vector3.new(0,4,0) bb.Adornee=core bb.Parent=core
     local frame=Instance.new("Frame") frame.BackgroundTransparency=1 frame.Size=UDim2.new(1,0,1,0) frame.Parent=bb
     local label=Instance.new("TextLabel")
     label.BackgroundTransparency=1 label.Size=UDim2.new(1,0,1,0) label.Font=Enum.Font.GothamBold
-    label.TextSize=14 label.TextColor3=Color3.fromRGB(200,150,255)
-    label.TextStrokeTransparency=0 label.TextStrokeColor3=Color3.fromRGB(0,0,0)
-    label.Text="☄ Meteor" label.Parent=frame
+    label.TextSize=14 label.TextColor3=Color3.fromRGB(180,120,255) label.Text="☄ Meteor" label.Parent=frame
     local conn=RunService.Heartbeat:Connect(function()
         if not meteorESP.enabled or not core or not core.Parent then return end
         local char=LocalPlayer.Character local hrp=char and char:FindFirstChild("HumanoidRootPart")
@@ -2745,7 +2703,6 @@ local function buildTopBillboard(top)
         lbl.TextSize=math.floor(baseTextSize*sc) lbl.TextColor3=color
         lbl.TextStrokeTransparency=0.5 lbl.TextStrokeColor3=Color3.fromRGB(0,0,0)
         lbl.TextXAlignment=Enum.TextXAlignment.Left lbl.Text=text lbl.Parent=bb
-        lbl:SetAttribute("_baseTextSize", baseTextSize)
         yPos+=LINE_H return lbl
     end
     makeLine(getOwnerName(top), Color3.fromRGB(255,255,255))
@@ -2756,13 +2713,11 @@ local function buildTopBillboard(top)
     rpmTitle.Position=UDim2.new(0,3,0,math.floor(rpmLabelRow*sc)) rpmTitle.Font=Enum.Font.GothamBold
     rpmTitle.TextSize=math.floor(15*sc) rpmTitle.TextColor3=Color3.fromRGB(200,200,200)
     rpmTitle.TextXAlignment=Enum.TextXAlignment.Left rpmTitle.Text="RPM" rpmTitle.Parent=bb
-    rpmTitle:SetAttribute("_baseTextSize", 15)
     local rpmPct=Instance.new("TextLabel")
     rpmPct.Name="RPMPct" rpmPct.BackgroundTransparency=1 rpmPct.Size=UDim2.new(0.5,-3,0,math.floor(RPM_LABEL_H*sc))
     rpmPct.Position=UDim2.new(0.5,0,0,math.floor(rpmLabelRow*sc)) rpmPct.Font=Enum.Font.GothamBold
     rpmPct.TextSize=math.floor(20*sc) rpmPct.TextColor3=Color3.fromRGB(200,200,200)
     rpmPct.TextXAlignment=Enum.TextXAlignment.Right rpmPct.Text="..." rpmPct.Parent=bb
-    rpmPct:SetAttribute("_baseTextSize", 20)
     local barY=rpmLabelRow+RPM_LABEL_H
     local barBG=Instance.new("Frame")
     barBG.Name="RPMBarBG" barBG.BackgroundColor3=Color3.fromRGB(30,30,40) barBG.BorderSizePixel=0
@@ -2776,7 +2731,6 @@ local function buildTopBillboard(top)
     barText.Name="RPMBarText" barText.BackgroundTransparency=1 barText.Size=UDim2.new(1,0,1,0)
     barText.Font=Enum.Font.GothamBold barText.TextSize=math.floor(14*sc) barText.TextColor3=Color3.fromRGB(255,255,255)
     barText.TextStrokeTransparency=0.3 barText.TextStrokeColor3=Color3.fromRGB(0,0,0) barText.Text="..." barText.Parent=barBG
-    barText:SetAttribute("_baseTextSize", 14)
     local stateY=barY+RPM_BAR_H+8
     local stateRow=Instance.new("TextLabel")
     stateRow.Name="StateRow" stateRow.BackgroundTransparency=1
@@ -2786,7 +2740,6 @@ local function buildTopBillboard(top)
     stateRow.TextColor3=Color3.fromRGB(200,200,200) stateRow.TextStrokeTransparency=0.5
     stateRow.TextStrokeColor3=Color3.fromRGB(0,0,0) stateRow.TextXAlignment=Enum.TextXAlignment.Center
     stateRow.Text="State: Idle" stateRow.Parent=bb
-    stateRow:SetAttribute("_baseTextSize", 13)
     local lastUpdate=0 local UPDATE_INTERVAL=0.1 local lastKnownRPM=0
     local zeroFrames=0 local ZERO_FRAME_THRESHOLD=8
     local rpmConn=RunService.Heartbeat:Connect(function(dt)
@@ -2815,11 +2768,6 @@ local function buildTopBillboard(top)
         end
         local freshPart=top:FindFirstChild("Body") or top:FindFirstChild("Crown") or top:FindFirstChildWhichIsA("BasePart")
         if freshPart and bb.Adornee~=freshPart then bb.Adornee=freshPart end
-    end)
-    -- apply current opacity immediately so rebuilds don't reset it
-    pcall(function()
-        local bg2=bb:FindFirstChildWhichIsA("Frame")
-        if bg2 then bg2.BackgroundTransparency=1-topInspector.opacity end
     end)
     topInspector.bbCache[top]={bb=bb,rpmConn=rpmConn,hl=inspHL} topInspector.buildLock[top]=nil
     local attrConn=top.AttributeChanged:Connect(function(attrName)
@@ -2891,33 +2839,24 @@ end})
 ESPLeft:AddSlider('TopESPScale',{Text='Billboard Size',Min=0,Max=100,Default=100,Rounding=0,Suffix='%',Callback=function(value)
     topInspector.scale = value / 100
     if not topInspector.enabled then return end
-    -- rescale in-place: just update the BillboardGui Size and text sizes
-    -- this avoids any destroy/recreate flicker
+    -- hide all first so there's no visible pop
+    for _, entry in pairs(topInspector.bbCache) do
+        pcall(function() entry.bb.Enabled = false end)
+    end
+    -- rebuild all at new scale
     for top, entry in pairs(topInspector.bbCache) do
-        pcall(function()
-            local bb = entry.bb
-            if not bb or not bb.Parent then return end
-            local sc = topInspector.scale
-            local BASE_W=260 local totalH=120
-            bb.Size = UDim2.new(0, math.floor(BASE_W*sc), 0, math.floor(totalH*sc))
-            -- rescale all text labels inside the billboard
-            for _, lbl in ipairs(bb:GetDescendants()) do
-                if lbl:IsA("TextLabel") or lbl:IsA("TextButton") then
-                    local baseSz = lbl:GetAttribute("_baseTextSize")
-                    if baseSz then
-                        lbl.TextSize = math.max(1, math.floor(baseSz * sc))
-                    end
-                end
-            end
-            -- reapply opacity
-            local bg = bb:FindFirstChildWhichIsA("Frame")
-            if bg then bg.BackgroundTransparency = 1 - topInspector.opacity end
-        end)
+        pcall(function() entry.rpmConn:Disconnect() end)
+        pcall(function() entry.bb:Destroy() end)
+        pcall(function() if entry.hl then entry.hl:Destroy() end end)
+        topInspector.bbCache[top] = nil
+        topInspector.buildLock[top] = nil
+    end
+    for _, top in ipairs(workspace.Tops:GetChildren()) do
+        task.spawn(buildTopBillboard, top)
     end
 end})
 ESPLeft:AddSlider('TopESPOpacity',{Text='Billboard Opacity',Min=0,Max=100,Default=100,Rounding=0,Suffix='%',Callback=function(value)
     topInspector._opacity = value / 100
-    topInspector.opacity = value / 100
     for _, entry in pairs(topInspector.bbCache) do
         pcall(function()
             local bg = entry.bb:FindFirstChildWhichIsA("Frame")
@@ -3010,62 +2949,39 @@ ESPLeft:AddToggle('NPCESP',{Text='NPC ESP',Default=false,Callback=onNPCESP})
 end -- NPC ESP do block
 
 -- Trash ESP
-local function isGoldTrash(part) return part:FindFirstChild("Golden")~=nil end
 local function createTrashESP(part)
-    -- always skip gold trash parts
-    if part:FindFirstChild("Golden") then return end
-    -- if gold trash ESP is on and this is gold, skip too (belt and braces)
-    if goldTrashESP.enabled and isGoldTrash(part) then return end
     if trashESP.bbCache[part] then return end
+    -- skip gold trash — gold trash ESP handles those separately
+    if part:FindFirstChild("Golden") then return end
     local prompt=part:FindFirstChild("Prompt") if not prompt then return end
     local oldHL=part:FindFirstChild("TrashESPHighlight") if oldHL then oldHL:Destroy() end
     local highlight=Instance.new("Highlight")
-    highlight.Name="TrashESPHighlight"
-    highlight.FillColor=Color3.fromRGB(200,200,200)
-    highlight.OutlineColor=Color3.fromRGB(255,255,255)
-    highlight.FillTransparency=0.4
-    highlight.OutlineTransparency=0
-    highlight.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Name="TrashESPHighlight" highlight.FillColor=Color3.fromRGB(180,180,180)
+    highlight.OutlineColor=Color3.fromRGB(180,180,180) highlight.FillTransparency=0.3
+    highlight.OutlineTransparency=0 highlight.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
     highlight.Adornee=part highlight.Parent=part highlight.Enabled=prompt.Enabled
     local bb=Instance.new("BillboardGui")
-    bb.Name="TrashESP" bb.AlwaysOnTop=true bb.Size=UDim2.new(0,120,0,36)
+    bb.Name="TrashESP" bb.AlwaysOnTop=true bb.Size=UDim2.new(0,110,0,34)
     bb.StudsOffset=Vector3.new(0,3,0) bb.Adornee=part bb.Parent=workspace bb.Enabled=prompt.Enabled
+    trashESP.bbCache[part]={bb=bb,highlight=highlight}
     local label=Instance.new("TextLabel")
     label.BackgroundTransparency=1 label.Size=UDim2.new(1,0,1,0) label.Font=Enum.Font.GothamBold
-    label.TextSize=11 label.TextColor3=Color3.fromRGB(220,220,220)
+    label.TextSize=11 label.TextColor3=Color3.fromRGB(180,180,180)
     label.TextStrokeTransparency=0 label.TextStrokeColor3=Color3.fromRGB(0,0,0)
     label.Text="🗑️ Trash" label.Parent=bb
-    trashESP.bbCache[part]={bb=bb,highlight=highlight}
     local heartbeatConn=RunService.Heartbeat:Connect(function()
         if not trashESP.enabled or not part or not part.Parent then return end
-        -- runtime check: if this became gold trash, hide and remove
-        if part:FindFirstChild("Golden") then
-            bb.Enabled=false highlight.Enabled=false return
-        end
-        local enabled=prompt.Enabled
-        bb.Enabled=enabled highlight.Enabled=enabled
-        if enabled then
-            local char=LocalPlayer.Character local hrp=char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then label.Text="🗑️ Trash\n"..math.floor((hrp.Position-part.Position).Magnitude).." studs" end
-        end
+        local char=LocalPlayer.Character local hrp=char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then label.Text="🗑️ Trash\n"..math.floor((hrp.Position-part.Position).Magnitude).." studs" end
     end)
     local promptConn=prompt:GetPropertyChangedSignal("Enabled"):Connect(function()
-        if part:FindFirstChild("Golden") then bb.Enabled=false highlight.Enabled=false return end
         bb.Enabled=prompt.Enabled highlight.Enabled=prompt.Enabled
     end)
-    -- watch if Golden child is added to this part at runtime
-    local goldenConn=part.ChildAdded:Connect(function(child)
-        if child.Name=="Golden" then
-            bb.Enabled=false highlight.Enabled=false
-        end
-    end)
-    trashESP.promptConns[part]={heartbeat=heartbeatConn,prompt=promptConn,golden=goldenConn}
+    trashESP.promptConns[part]={heartbeat=heartbeatConn,prompt=promptConn}
 end
 local function clearTrashESP()
     for part,conns in pairs(trashESP.promptConns) do
-        pcall(function() conns.heartbeat:Disconnect() end)
-        pcall(function() conns.prompt:Disconnect() end)
-        pcall(function() if conns.golden then conns.golden:Disconnect() end end)
+        pcall(function() conns.heartbeat:Disconnect() end) pcall(function() conns.prompt:Disconnect() end)
     end trashESP.promptConns={}
     for _,entry in pairs(trashESP.bbCache) do
         pcall(function() entry.bb:Destroy() end) pcall(function() entry.highlight:Destroy() end)
@@ -3073,31 +2989,16 @@ local function clearTrashESP()
 end
 ESPLeft:AddToggle('TrashESP',{Text='Trash ESP',Default=false,Callback=function(value)
     trashESP.enabled=value
-    if value then
-        for _,part in ipairs(workspace.Map.Environment.Trash:GetChildren()) do
-            if not part:FindFirstChild("Golden") then createTrashESP(part) end
-        end
-        -- watch for new trash spawning
-        if not trashESP._addedConn then
-            trashESP._addedConn=workspace.Map.Environment.Trash.ChildAdded:Connect(function(part)
-                if not trashESP.enabled then return end
-                if not part:FindFirstChild("Golden") then
-                    task.wait(0.05) createTrashESP(part)
-                end
-            end)
-        end
-    else
-        clearTrashESP()
-        if trashESP._addedConn then trashESP._addedConn:Disconnect() trashESP._addedConn=nil end
-    end
+    if value then for _,part in ipairs(workspace.Map.Environment.Trash:GetChildren()) do createTrashESP(part) end
+    else clearTrashESP() end
 end})
 
 -- Gold Trash ESP
+local function isGoldTrash(part) return part:FindFirstChild("Golden")~=nil end
 local function createGoldTrashESP(part)
-    if not isGoldTrash(part) then return end
     if goldTrashESP.bbCache[part] then return end
     local prompt=part:FindFirstChild("Prompt") if not prompt then return end
-    -- evict any normal trash ESP on this part
+    -- remove any normal trash ESP on this part to avoid overlap
     local oldTrashHL=part:FindFirstChild("TrashESPHighlight") if oldTrashHL then oldTrashHL:Destroy() end
     if trashESP.bbCache[part] then
         pcall(function() trashESP.bbCache[part].bb:Destroy() end)
@@ -3105,37 +3006,29 @@ local function createGoldTrashESP(part)
         if trashESP.promptConns[part] then
             pcall(function() trashESP.promptConns[part].heartbeat:Disconnect() end)
             pcall(function() trashESP.promptConns[part].prompt:Disconnect() end)
-            pcall(function() if trashESP.promptConns[part].golden then trashESP.promptConns[part].golden:Disconnect() end end)
             trashESP.promptConns[part]=nil
         end
         trashESP.bbCache[part]=nil
     end
     local oldHL=part:FindFirstChild("GoldTrashESPHighlight") if oldHL then oldHL:Destroy() end
     local highlight=Instance.new("Highlight")
-    highlight.Name="GoldTrashESPHighlight"
-    highlight.FillColor=Color3.fromRGB(255,215,0)
-    highlight.OutlineColor=Color3.fromRGB(255,255,180)
-    highlight.FillTransparency=0.3
-    highlight.OutlineTransparency=0
-    highlight.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Name="GoldTrashESPHighlight" highlight.FillColor=Color3.fromRGB(255,215,0)
+    highlight.OutlineColor=Color3.fromRGB(255,215,0) highlight.FillTransparency=0.3
+    highlight.OutlineTransparency=0 highlight.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
     highlight.Adornee=part highlight.Parent=part highlight.Enabled=prompt.Enabled
     local bb=Instance.new("BillboardGui")
-    bb.Name="GoldTrashESP" bb.AlwaysOnTop=true bb.Size=UDim2.new(0,140,0,40)
+    bb.Name="GoldTrashESP" bb.AlwaysOnTop=true bb.Size=UDim2.new(0,130,0,38)
     bb.StudsOffset=Vector3.new(0,3,0) bb.Adornee=part bb.Parent=workspace bb.Enabled=prompt.Enabled
+    goldTrashESP.bbCache[part]={bb=bb,highlight=highlight}
     local label=Instance.new("TextLabel")
     label.BackgroundTransparency=1 label.Size=UDim2.new(1,0,1,0) label.Font=Enum.Font.GothamBold
-    label.TextSize=13 label.TextColor3=Color3.fromRGB(255,225,50)
+    label.TextSize=13 label.TextColor3=Color3.fromRGB(255,215,0)
     label.TextStrokeTransparency=0 label.TextStrokeColor3=Color3.fromRGB(0,0,0)
     label.Text="💰 Gold Trash" label.Parent=bb
-    goldTrashESP.bbCache[part]={bb=bb,highlight=highlight}
     local heartbeatConn=RunService.Heartbeat:Connect(function()
         if not goldTrashESP.enabled or not part or not part.Parent then return end
-        local enabled=prompt.Enabled
-        bb.Enabled=enabled highlight.Enabled=enabled
-        if enabled then
-            local char=LocalPlayer.Character local hrp=char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then label.Text="💰 Gold Trash\n"..math.floor((hrp.Position-part.Position).Magnitude).." studs" end
-        end
+        local char=LocalPlayer.Character local hrp=char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then label.Text="💰 Gold Trash\n"..math.floor((hrp.Position-part.Position).Magnitude).." studs" end
     end)
     local promptConn=prompt:GetPropertyChangedSignal("Enabled"):Connect(function()
         bb.Enabled=prompt.Enabled highlight.Enabled=prompt.Enabled
@@ -3183,21 +3076,16 @@ local function createDumpsterESP(part)
     local prompt=part:FindFirstChild("Prompt") if not prompt then return end
     local oldHL=part:FindFirstChild("DumpsterESPHighlight") if oldHL then oldHL:Destroy() end
     local highlight=Instance.new("Highlight")
-    highlight.Name="DumpsterESPHighlight"
-    highlight.FillColor=Color3.fromRGB(0,200,80)
-    highlight.OutlineColor=Color3.fromRGB(180,255,180)
-    highlight.FillTransparency=0.35
-    highlight.OutlineTransparency=0
-    highlight.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Name="DumpsterESPHighlight" highlight.FillColor=Color3.fromRGB(0,200,80)
+    highlight.OutlineColor=Color3.fromRGB(0,200,80) highlight.FillTransparency=0.3
+    highlight.OutlineTransparency=100 highlight.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
     highlight.Adornee=part highlight.Parent=part
     local bb=Instance.new("BillboardGui")
-    bb.Name="DumpsterESP" bb.AlwaysOnTop=true bb.Size=UDim2.new(0,160,0,42)
+    bb.Name="DumpsterESP" bb.AlwaysOnTop=true bb.Size=UDim2.new(0,150,0,40)
     bb.StudsOffset=Vector3.new(0,4,0) bb.Adornee=part bb.Parent=workspace
     local label=Instance.new("TextLabel")
     label.BackgroundTransparency=1 label.Size=UDim2.new(1,0,1,0) label.Font=Enum.Font.GothamBold
-    label.TextSize=13 label.TextColor3=Color3.fromRGB(0,230,80)
-    label.TextStrokeTransparency=0 label.TextStrokeColor3=Color3.fromRGB(0,0,0)
-    label.Text="♻️ Dumpster" label.Parent=bb
+    label.TextSize=14 label.TextColor3=Color3.fromRGB(0,220,80) label.Text="♻️ Dumpster" label.Parent=bb
     local heartbeatConn=RunService.Heartbeat:Connect(function()
         if not dumpsterESP.enabled or not part or not part.Parent then return end
         local onCooldown=isDumpsterOnCooldown(part)
@@ -3236,19 +3124,6 @@ local function getTopForPlayer(playerName)
     return nil
 end
 
-local _lastBattleCheck = 0
-local _lastBattleResult = false
-local function isInBattle()
-    local now = tick()
-    if now - _lastBattleCheck < 0.05 then return _lastBattleResult end
-    _lastBattleCheck = now
-    local myId = tostring(LocalPlayer.UserId)
-    local myTop = workspace.Tops:FindFirstChild(myId)
-    _lastBattleResult = myTop ~= nil and myTop:GetAttribute("IsStadiumFight") == true
-        and (myTop:GetAttribute("Health") or 0) > 0
-    return _lastBattleResult
-end
-
 local function destroyViewerGui()
     if viewer.liveConn then viewer.liveConn:Disconnect() viewer.liveConn=nil end
     if viewer._noTopWatchConn then viewer._noTopWatchConn:Disconnect() viewer._noTopWatchConn=nil end
@@ -3267,7 +3142,6 @@ local function buildViewerGui(playerName, top)
     local sg=Instance.new("ScreenGui")
     sg.Name="PlayerTopViewerGui" sg.ResetOnSpawn=false sg.DisplayOrder=998 sg.Parent=playerGui
     viewer.gui=sg
-    sg.Enabled = false
     local frame=Instance.new("Frame")
     frame.BackgroundColor3=Color3.fromRGB(10,10,20) frame.BackgroundTransparency=0.15
     frame.BorderSizePixel=0 frame.Size=UDim2.new(0,280,0,575)
@@ -3356,7 +3230,17 @@ local function buildViewerGui(playerName, top)
         return
     end
 
-    -- Build immediately; attributes will fill in via the live heartbeat
+    -- Wait for attributes to replicate before building
+    local deadline = tick() + 5
+    repeat
+        task.wait(0.2)
+        if not top or not top.Parent then return end
+        local allReady = _topAttr(top, "Spirit") ~= "?"
+            and _partAttr(top, "Body")  ~= "?"
+            and _partAttr(top, "Belt")  ~= "?"
+            and _partAttr(top, "Crown") ~= "?"
+            and _partAttr(top, "Point") ~= "?"
+    until allReady or tick() > deadline
 
     -- Top is present, build stat rows
     local y=0
@@ -3501,13 +3385,6 @@ local divStatusViewer=Instance.new("Frame") divStatusViewer.BackgroundColor3=Col
     local EVEN_THRESHOLD=3
     viewer.liveConn=RunService.Heartbeat:Connect(function(dt)
         updateInterval+=dt if updateInterval<0.016 then return end updateInterval=0
-        -- hide viewer when not in battle
-        do
-            local _inBattle = isInBattle()
-            if viewer.gui and viewer.gui.Enabled ~= _inBattle then
-                viewer.gui.Enabled = _inBattle
-            end
-        end
         if not top or not top.Parent then
             if viewer._fightEndHandled==false then
                 viewer._fightEndHandled=true
@@ -3884,9 +3761,6 @@ local function startAutoOpponentViewer()
     end)
     local existingMyTop=workspace.Tops:FindFirstChild(myId)
     if existingMyTop then hookMyTop(existingMyTop) end
-    if not viewer.gui and isInBattle() then
-        buildViewerGui("Waiting for beyblade...",nil)
-    end
 
     local cycleList={} local cycleIndex=1 local CYCLE_INTERVAL=3 local cycleLastSwitchTime=0
     local function getAllOpponentsInArena()
@@ -4015,11 +3889,7 @@ ESPViewer:AddToggle('AutoOpponentViewer',{Text='Auto Show Opponents Top',Default
     viewer.autoEnabled=value
     if value then
         startAutoOpponentViewer()
-        if not viewer.gui then
-            if isInBattle() then
-                buildViewerGui("Waiting for beyblade...",nil)
-            end
-        end
+        if not viewer.gui then buildViewerGui("Waiting for beyblade...",nil) end
     else stopAutoOpponentViewer() destroyViewerGui() end
 end})
 
@@ -4104,19 +3974,9 @@ local function buildOwnRpmGui()
     local ownStatusLabel=Instance.new("TextLabel") ownStatusLabel.BackgroundTransparency=1 ownStatusLabel.Size=UDim2.new(1,0,0,18) ownStatusLabel.Position=UDim2.new(0,0,0,72) ownStatusLabel.Font=Enum.Font.GothamBold ownStatusLabel.TextSize=12 ownStatusLabel.TextColor3=Color3.fromRGB(150,150,150) ownStatusLabel.TextXAlignment=Enum.TextXAlignment.Center ownStatusLabel.Text="Status: Waiting..." ownStatusLabel.Parent=content
 
     local lastKnownRPM=0 local zeroFrames=0 local ZERO_THRESH=8 local updateInterval=0
-    local rpmUpdateInterval=0
-    sg.Enabled = false
     viewer.ownRpmConn=RunService.Heartbeat:Connect(function(dt)
-        updateInterval+=dt
-        -- visibility synced at same rate as viewer (0.016s)
-        if viewer.ownRpmGui then
-            local _inBattle = isInBattle()
-            if viewer.ownRpmGui.Enabled ~= _inBattle then
-                viewer.ownRpmGui.Enabled = _inBattle
-            end
-        end
-        -- actual RPM data update throttled to 0.1s
-        rpmUpdateInterval+=dt if rpmUpdateInterval<0.1 then return end rpmUpdateInterval=0
+        updateInterval+=dt if updateInterval<0.1 then return end updateInterval=0
+
         -- ── RPM update (unchanged from original) ──────────────────────────
         local myTop=workspace.Tops:FindFirstChild(tostring(LocalPlayer.UserId))
         if not myTop then
@@ -4191,7 +4051,6 @@ local function buildExtraStatsGui()
     local sg = Instance.new("ScreenGui")
     sg.Name = "ExtraStatsGui" sg.ResetOnSpawn = false sg.DisplayOrder = 997 sg.Parent = playerGui
     extraStatsGui = sg
-    sg.Enabled = false
 
     local frame = Instance.new("Frame")
     frame.BackgroundColor3 = Color3.fromRGB(10, 10, 20) frame.BackgroundTransparency = 0.15
@@ -4266,18 +4125,11 @@ local function buildExtraStatsGui()
 
     local lastTop = nil
     local updateInterval = 0
-    local visInterval = 0
     extraStatsConn = RunService.Heartbeat:Connect(function(dt)
-        -- visibility synced immediately every frame
-        if extraStatsGui then
-            local _inBattle = isInBattle()
-            if extraStatsGui.Enabled ~= _inBattle then
-                extraStatsGui.Enabled = _inBattle
-            end
-        end
         updateInterval += dt
         if updateInterval < 0.015 then return end
         updateInterval = 0
+
         local top = viewer.currentTop
         if not top or not top.Parent then
             if speedVal.Text ~= "—" then
